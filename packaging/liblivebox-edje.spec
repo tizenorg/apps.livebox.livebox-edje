@@ -1,11 +1,11 @@
 Name: liblivebox-edje
 Summary: EDJE Script loader for the data provider master
-Version: 0.1.17
+Version: 0.1.18
 Release: 1
 Group: main/app
 License: Flora License
 Source0: %{name}-%{version}.tar.gz
-BuildRequires: cmake, gettext-tools
+BuildRequires: cmake, gettext-tools, coreutils
 BuildRequires: pkgconfig(dlog)
 BuildRequires: pkgconfig(eina)
 BuildRequires: pkgconfig(evas)
@@ -28,7 +28,7 @@ make %{?jobs:-j%jobs}
 %install
 rm -rf %{buildroot}
 %make_install
-mkdir -p %{buildroot}/usr/share/license
+mkdir -p %{buildroot}/%{_datarootdir}/license
 
 %post
 
@@ -36,4 +36,6 @@ mkdir -p %{buildroot}/usr/share/license
 %manifest liblivebox-edje.manifest
 %defattr(-,root,root,-)
 /opt/usr/live/script_port/*.so*
-/usr/share/license/*
+%{_datarootdir}/license/*
+
+# End of a file
