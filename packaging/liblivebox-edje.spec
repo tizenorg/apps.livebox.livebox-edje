@@ -1,6 +1,6 @@
 Name: liblivebox-edje
 Summary: EDJE Script loader for the data provider master
-Version: 0.1.18
+Version: 0.1.19
 Release: 1
 Group: main/app
 License: Flora License
@@ -16,7 +16,7 @@ BuildRequires: pkgconfig(ecore-x)
 BuildRequires: pkgconfig(ecore)
 
 %description
-EDJE Script loader plugin for the data provider master
+Plugin for the data provider master to load the edje scripts
 
 %prep
 %setup -q
@@ -35,7 +35,7 @@ mkdir -p %{buildroot}/%{_datarootdir}/license
 %files -n liblivebox-edje
 %manifest liblivebox-edje.manifest
 %defattr(-,root,root,-)
-/opt/usr/live/script_port/*.so*
+/usr/share/data-provider-master/plugin-script/*.so*
 %{_datarootdir}/license/*
 
 # End of a file
