@@ -33,7 +33,7 @@
 
 #include "script_port.h"
 
-#define TEXT_CLASS	"slp"
+#define TEXT_CLASS	"tizen"
 
 extern void evas_common_font_flush(void);
 extern int evas_common_font_cache_get(void);

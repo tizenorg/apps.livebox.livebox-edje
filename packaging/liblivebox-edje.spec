@@ -1,8 +1,8 @@
 Name: liblivebox-edje
 Summary: EDJE Script loader for the data provider master
-Version: 0.1.19
+Version: 0.1.20
 Release: 1
-Group: main/app
+Group: framework/livebox
 License: Flora License
 Source0: %{name}-%{version}.tar.gz
 BuildRequires: cmake, gettext-tools, coreutils
