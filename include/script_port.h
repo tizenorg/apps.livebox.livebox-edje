@@ -25,6 +25,7 @@ extern int script_signal_emit(Evas *e, const char *part, const char *signal, dou
 /*!
  * Implement below functions
  */
+extern int script_update_color(void *h, Evas *e, const char *id, const char *part, const char *rgba);
 extern int script_update_text(void *h, Evas *e, const char *id, const char *part, const char *text);
 extern int script_update_image(void *h, Evas *e, const char *id, const char *part, const char *path);
 extern int script_update_script(void *h, Evas *e, const char *src_id, const char *target_id, const char *part, const char *path, const char *group);

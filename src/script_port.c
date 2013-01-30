@@ -142,6 +142,35 @@ const char *script_magic_id(void)
 	return "edje";
 }
 
+int script_update_color(void *h, Evas *e, const char *id, const char *part, const char *rgba)
+{
+	struct info *handle = h;
+	Evas_Object *edje;
+	int r[3], g[3], b[3], a[3];
+	int ret;
+
+	edje = find_edje(handle, id);
+	if (!edje)
+		return -ENOENT;
+
+	ret = sscanf(rgba, "%d %d %d %d %d %d %d %d %d %d %d %d",
+					r, g, b, a,			/* OBJECT */
+					r + 1, g + 1, b + 1, a + 1,	/* OUTLINE */
+					r + 2, g + 2, b + 2, a + 2);	/* SHADOW */
+	if (ret != 12) {
+		DbgPrint("id[%s] part[%s] rgba[%s]\n", id, part, rgba);
+		return -EINVAL;
+	}
+
+	ret = edje_object_color_class_set(edje, part,
+				r[0], g[0], b[0], a[0], /* OBJECT */
+				r[1], g[1], b[1], a[1], /* OUTLINE */
+				r[2], g[2], b[2], a[2]); /* SHADOW */
+
+	DbgPrint("EDJE[%s] color class is %s changed", id, ret == EINA_TRUE ? "successfully" : "not");
+	return 0;
+}
+
 int script_update_text(void *h, Evas *e, const char *id, const char *part, const char *text)
 {
 	struct info *handle = h;
