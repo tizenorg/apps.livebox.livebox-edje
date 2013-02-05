@@ -253,6 +253,8 @@ int script_update_image(void *_h, Evas *e, const char *id, const char *part, con
 		return -EFAULT;
 	}
 
+	evas_object_image_load_orientation_set(img, EINA_TRUE);
+
 	child->obj = img;
 
 	evas_object_image_file_set(img, path, NULL);
