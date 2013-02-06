@@ -18,6 +18,7 @@
 #include <libgen.h>
 #include <errno.h>
 #include <unistd.h>
+#include <ctype.h>
 
 #include <Evas.h>
 #include <Edje.h>
@@ -38,6 +39,11 @@
 extern void evas_common_font_flush(void);
 extern int evas_common_font_cache_get(void);
 extern void evas_common_font_cache_set(int size);
+
+struct image_option {
+	int orient;
+	int aspect;
+};
 
 struct info {
 	char *file;
@@ -184,7 +190,140 @@ int script_update_text(void *h, Evas *e, const char *id, const char *part, const
 	return 0;
 }
 
-int script_update_image(void *_h, Evas *e, const char *id, const char *part, const char *path)
+static void parse_aspect(struct image_option *img_opt, const char *value, int len)
+{
+	while (len > 0 && *value == ' ') {
+		value++;
+		len--;
+	}
+
+	if (len < 4)
+		return;
+
+	img_opt->aspect = !strncasecmp(value, "true", 4);
+	DbgPrint("Parsed ASPECT: %d\n", img_opt->aspect);
+}
+
+static void parse_orient(struct image_option *img_opt, const char *value, int len)
+{
+	while (len > 0 && *value == ' ') {
+		value++;
+		len--;
+	}
+
+	if (len < 4)
+		return;
+
+	img_opt->orient = !strncasecmp(value, "true", 4);
+	DbgPrint("Parsed ORIENT: %d\n", img_opt->aspect);
+}
+
+static inline void parse_image_option(const char *option, struct image_option *img_opt)
+{
+	const char *ptr;
+	const char *cmd;
+	const char *value;
+	struct {
+		const char *cmd;
+		void (*handler)(struct image_option *img_opt, const char *value, int len);
+	} cmd_list[] = {
+		{
+			.cmd = "aspect",
+			.handler = parse_aspect,
+		},
+		{
+			.cmd = "orient",
+			.handler = parse_orient,
+		},
+	};
+	enum {
+		STATE_START,
+		STATE_TOKEN,
+		STATE_DATA,
+		STATE_IGNORE,
+		STATE_ERROR,
+		STATE_END,
+	} state;
+	int idx;
+	int tag;
+
+	if (!option || !*option)
+		return;
+
+	state = STATE_START;
+
+	for (ptr = option; state != STATE_END; ptr++) {
+		switch (state) {
+		case STATE_START:
+			if (*ptr == '\0') {
+				state = STATE_END;
+				continue;
+			}
+
+			if (isalpha(*ptr)) {
+				state = STATE_TOKEN;
+				ptr--;
+			}
+			tag = 0;
+			idx = 0;
+
+			cmd = cmd_list[tag].cmd;
+			break;
+		case STATE_IGNORE:
+			if (*ptr == '=') {
+				state = STATE_DATA;
+				value = ptr;
+			} else if (*ptr == '\0') {
+				state = STATE_END;
+			}
+			break;
+		case STATE_TOKEN:
+			if (cmd[idx] == '\0' && (*ptr == ' ' || *ptr == '\t' || *ptr == '=')) {
+				if (*ptr == '=') {
+					value = ptr;
+					state = STATE_DATA;
+				} else {
+					state = STATE_IGNORE;
+				}
+				idx = 0;
+			} else if (*ptr == '\0') {
+				state = STATE_END;
+			} else if (cmd[idx] == *ptr) {
+				idx++;
+			} else {
+				ptr -= (idx + 1);
+
+				tag++;
+				if (tag == sizeof(cmd_list) / sizeof(cmd_list[0])) {
+					tag = 0;
+					state = STATE_ERROR;
+				} else {
+					cmd = cmd_list[tag].cmd;
+				}
+				idx = 0;
+			}
+			break;
+		case STATE_DATA:
+			if (*ptr == ';' || *ptr == '\0') {
+				cmd_list[tag].handler(img_opt, value + 1, idx);
+				state = *ptr ? STATE_START : STATE_END;
+			} else {
+				idx++;
+			}
+			break;
+		case STATE_ERROR:
+			if (*ptr == ';')
+				state = STATE_START;
+			else if (*ptr == '\0')
+				state = STATE_END;
+			break;
+		default:
+			break;
+		}
+	}
+}
+
+int script_update_image(void *_h, Evas *e, const char *id, const char *part, const char *path, const char *option)
 {
 	struct info *handle = _h;
 	Evas_Load_Error err;
@@ -193,6 +332,10 @@ int script_update_image(void *_h, Evas *e, const char *id, const char *part, con
 	Evas_Coord w, h;
 	struct obj_info *obj_info;
 	struct child *child;
+	struct image_option img_opt = {
+		.aspect = 0,
+		.orient = 0,
+	};
 
 	edje = find_edje(handle, id);
 	if (!edje) {
@@ -253,11 +396,13 @@ int script_update_image(void *_h, Evas *e, const char *id, const char *part, con
 		return -EFAULT;
 	}
 
-	evas_object_image_load_orientation_set(img, EINA_TRUE);
+	parse_image_option(option, &img_opt);
+	evas_object_image_load_orientation_set(img, img_opt.orient);
 
 	child->obj = img;
 
 	evas_object_image_file_set(img, path, NULL);
+
 	err = evas_object_image_load_error_get(img);
 	if (err != EVAS_LOAD_ERROR_NONE) {
 		ErrPrint("Load error: %s\n", evas_load_error_str(err));
@@ -270,7 +415,10 @@ int script_update_image(void *_h, Evas *e, const char *id, const char *part, con
 	evas_object_image_size_get(img, &w, &h);
 	evas_object_image_fill_set(img, 0, 0, w, h);
 	evas_object_size_hint_fill_set(img, EVAS_HINT_FILL, EVAS_HINT_FILL);
-	evas_object_size_hint_weight_set(img, EVAS_HINT_EXPAND, EVAS_HINT_EXPAND);
+	if (img_opt.aspect)
+		evas_object_size_hint_aspect_set(img, EVAS_ASPECT_CONTROL_BOTH, w, h);
+	else
+		evas_object_size_hint_weight_set(img, EVAS_HINT_EXPAND, EVAS_HINT_EXPAND);
 	evas_object_resize(img, w, h);
 
 	/*!
