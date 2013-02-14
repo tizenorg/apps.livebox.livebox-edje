@@ -36,6 +36,8 @@
 
 #define TEXT_CLASS	"tizen"
 
+#define PUBLIC __attribute__((visibility("default")))
+
 extern void evas_common_font_flush(void);
 extern int evas_common_font_cache_get(void);
 extern void evas_common_font_cache_set(int size);
@@ -67,7 +69,7 @@ struct obj_info {
 	Eina_List *children;
 };
 
-struct {
+static struct {
 	Ecore_Event_Handler *property_handler;
 	char *font;
 	int size;
@@ -143,12 +145,12 @@ static inline Evas_Object *find_edje(struct info *handle, const char *id)
 	return NULL;
 }
 
-const char *script_magic_id(void)
+PUBLIC const char *script_magic_id(void)
 {
 	return "edje";
 }
 
-int script_update_color(void *h, Evas *e, const char *id, const char *part, const char *rgba)
+PUBLIC int script_update_color(void *h, Evas *e, const char *id, const char *part, const char *rgba)
 {
 	struct info *handle = h;
 	Evas_Object *edje;
@@ -177,7 +179,7 @@ int script_update_color(void *h, Evas *e, const char *id, const char *part, cons
 	return 0;
 }
 
-int script_update_text(void *h, Evas *e, const char *id, const char *part, const char *text)
+PUBLIC int script_update_text(void *h, Evas *e, const char *id, const char *part, const char *text)
 {
 	struct info *handle = h;
 	Evas_Object *edje;
@@ -323,7 +325,7 @@ static inline void parse_image_option(const char *option, struct image_option *i
 	}
 }
 
-int script_update_image(void *_h, Evas *e, const char *id, const char *part, const char *path, const char *option)
+PUBLIC int script_update_image(void *_h, Evas *e, const char *id, const char *part, const char *path, const char *option)
 {
 	struct info *handle = _h;
 	Evas_Load_Error err;
@@ -495,7 +497,7 @@ static void edje_del_cb(void *_info, Evas *e, Evas_Object *obj, void *event_info
 	free(obj_info);
 }
 
-int script_update_script(void *h, Evas *e, const char *src_id, const char *target_id, const char *part, const char *path, const char *group)
+PUBLIC int script_update_script(void *h, Evas *e, const char *src_id, const char *target_id, const char *part, const char *path, const char *group)
 {
 	struct info *handle = h;
 	Evas_Object *edje;
@@ -611,7 +613,7 @@ int script_update_script(void *h, Evas *e, const char *src_id, const char *targe
 	return 0;
 }
 
-int script_update_signal(void *h, Evas *e, const char *id, const char *part, const char *signal)
+PUBLIC int script_update_signal(void *h, Evas *e, const char *id, const char *part, const char *signal)
 {
 	struct info *handle = h;
 	Evas_Object *edje;
@@ -626,7 +628,7 @@ int script_update_signal(void *h, Evas *e, const char *id, const char *part, con
 	return 0;
 }
 
-int script_update_drag(void *h, Evas *e, const char *id, const char *part, double x, double y)
+PUBLIC int script_update_drag(void *h, Evas *e, const char *id, const char *part, double x, double y)
 {
 	struct info *handle = h;
 	Evas_Object *edje;
@@ -641,7 +643,7 @@ int script_update_drag(void *h, Evas *e, const char *id, const char *part, doubl
 	return 0;
 }
 
-int script_update_size(void *han, Evas *e, const char *id, int w, int h)
+PUBLIC int script_update_size(void *han, Evas *e, const char *id, int w, int h)
 {
 	struct info *handle = han;
 	Evas_Object *edje;
@@ -660,7 +662,7 @@ int script_update_size(void *han, Evas *e, const char *id, int w, int h)
 	return 0;
 }
 
-int script_update_category(void *h, Evas *e, const char *id, const char *category)
+PUBLIC int script_update_category(void *h, Evas *e, const char *id, const char *category)
 {
 	struct info *handle = h;
 
@@ -683,7 +685,7 @@ int script_update_category(void *h, Evas *e, const char *id, const char *categor
 	return 0;
 }
 
-void *script_create(const char *file, const char *group)
+PUBLIC void *script_create(const char *file, const char *group)
 {
 	struct info *handle;
 
@@ -713,7 +715,7 @@ void *script_create(const char *file, const char *group)
 	return handle;
 }
 
-int script_destroy(void *_handle)
+PUBLIC int script_destroy(void *_handle)
 {
 	struct info *handle;
 	Evas_Object *edje;
@@ -731,7 +733,7 @@ int script_destroy(void *_handle)
 	return 0;
 }
 
-int script_load(void *_handle, Evas *e, int w, int h)
+PUBLIC int script_load(void *_handle, Evas *e, int w, int h)
 {
 	struct info *handle;
 	Evas_Object *edje;
@@ -782,7 +784,7 @@ int script_load(void *_handle, Evas *e, int w, int h)
 	return 0;
 }
 
-int script_unload(void *_handle, Evas *e)
+PUBLIC int script_unload(void *_handle, Evas *e)
 {
 	struct info *handle;
 	Evas_Object *edje;
@@ -862,7 +864,7 @@ static void font_size_cb(keynode_t *node, void *user_data)
 	DbgPrint("Size type: %d\n", vconf_keynode_get_int(node));
 }
 
-int script_init(void)
+PUBLIC int script_init(void)
 {
 	int ret;
 	/* ecore is already initialized */
@@ -883,7 +885,7 @@ int script_init(void)
 	return 0;
 }
 
-int script_fini(void)
+PUBLIC int script_fini(void)
 {
 
 	vconf_ignore_key_changed("db/setting/accessibility/font_name", font_name_cb);
