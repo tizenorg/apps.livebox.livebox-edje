@@ -50,6 +50,9 @@ struct image_option {
 		FILL_IN_SIZE,
 		FILL_OVER_SIZE,
 	} fill;
+
+	int width;
+	int height;
 };
 
 struct info {
@@ -208,7 +211,7 @@ static void parse_aspect(struct image_option *img_opt, const char *value, int le
 		return;
 
 	img_opt->aspect = !strncasecmp(value, "true", 4);
-	DbgPrint("Parsed ASPECT: %d\n", img_opt->aspect);
+	DbgPrint("Parsed ASPECT: %d (%s)\n", img_opt->aspect, value);
 }
 
 static void parse_orient(struct image_option *img_opt, const char *value, int len)
@@ -222,7 +225,35 @@ static void parse_orient(struct image_option *img_opt, const char *value, int le
 		return;
 
 	img_opt->orient = !strncasecmp(value, "true", 4);
-	DbgPrint("Parsed ORIENT: %d\n", img_opt->aspect);
+	DbgPrint("Parsed ORIENT: %d (%s)\n", img_opt->aspect, value);
+}
+
+static void parse_size(struct image_option *img_opt, const char *value, int len)
+{
+	int width;
+	int height;
+	char *buf;
+
+	while (len > 0 && *value == ' ') {
+		value++;
+		len--;
+	}
+
+	buf = strndup(value, len);
+	if (!buf) {
+		ErrPrint("Heap: %s\n", strerror(errno));
+		return;
+	}
+
+	if (sscanf(buf, "%dx%d", &width, &height) == 2) {
+		img_opt->width = width;
+		img_opt->height = height;
+		DbgPrint("Parsed size : %dx%d (%s)\n", width, height, buf);
+	} else {
+		DbgPrint("Invalid size tag[%s]\n", buf);
+	}
+
+	free(buf);
 }
 
 static void parse_fill(struct image_option *img_opt, const char *value, int len)
@@ -232,14 +263,14 @@ static void parse_fill(struct image_option *img_opt, const char *value, int len)
 		len--;
 	}
 
-	if (!strcasecmp(value, "in-size"))
+	if (!strncasecmp(value, "in-size", len))
 		img_opt->fill = FILL_IN_SIZE;
-	else if (!strcasecmp(value, "over-size"))
+	else if (!strncasecmp(value, "over-size", len))
 		img_opt->fill = FILL_OVER_SIZE;
 	else
 		img_opt->fill = FILL_DISABLE;
 
-	DbgPrint("Parsed FILL: %d\n", img_opt->fill);
+	DbgPrint("Parsed FILL: %d (%s)\n", img_opt->fill, value);
 }
 
 static inline void parse_image_option(const char *option, struct image_option *img_opt)
@@ -262,6 +293,10 @@ static inline void parse_image_option(const char *option, struct image_option *i
 		{
 			.cmd = "fill", /* Fill the image to its container */
 			.handler = parse_fill, /* Value: in-size, over-size, disable(default) */
+		},
+		{
+			.cmd = "size",
+			.handler = parse_size,
 		},
 	};
 	enum {
@@ -351,6 +386,26 @@ static inline void parse_image_option(const char *option, struct image_option *i
 	}
 }
 
+static void cropped_resize_cb(void *data, Evas *e, Evas_Object *obj, void *ei)
+{
+        Evas_Coord w;
+        Evas_Coord h;
+	int part_w;
+	int part_h;
+
+        /* grab image size */
+	part_w = (int)evas_object_data_get(obj, "part_w");
+	part_h = (int)evas_object_data_get(obj, "part_h");
+	w = (int)evas_object_data_get(obj, "w");
+	h = (int)evas_object_data_get(obj, "h");
+
+        /* grab base object dimensions */
+	evas_object_resize(obj, part_w, part_h);
+	evas_object_image_fill_set(obj, 0, 0, w, h);
+
+	DbgPrint("Cropped: %dx%d - %dx%d, ImageSize(%dx%d)\n", (w - part_w) / 2, (h - part_h) / 2, part_w, part_h, w, h);
+}
+
 PUBLIC int script_update_image(void *_h, Evas *e, const char *id, const char *part, const char *path, const char *option)
 {
 	struct info *handle = _h;
@@ -364,6 +419,8 @@ PUBLIC int script_update_image(void *_h, Evas *e, const char *id, const char *pa
 		.aspect = 0,
 		.orient = 0,
 		.fill = FILL_DISABLE,
+		.width = -1,
+		.height = -1,
 	};
 
 	edje = find_edje(handle, id);
@@ -417,7 +474,7 @@ PUBLIC int script_update_image(void *_h, Evas *e, const char *id, const char *pa
 		return -ENOMEM;
 	}
 
-	img = evas_object_image_filled_add(e);
+	img = evas_object_image_add(e);
 	if (!img) {
 		ErrPrint("Failed to add an image object\n");
 		free(child->part);
@@ -427,8 +484,6 @@ PUBLIC int script_update_image(void *_h, Evas *e, const char *id, const char *pa
 
 	parse_image_option(option, &img_opt);
 	evas_object_image_load_orientation_set(img, img_opt.orient);
-
-	child->obj = img;
 
 	evas_object_image_file_set(img, path, NULL);
 
@@ -446,10 +501,17 @@ PUBLIC int script_update_image(void *_h, Evas *e, const char *id, const char *pa
 		if (img_opt.fill == FILL_OVER_SIZE) {
 			Evas_Coord part_w;
 			Evas_Coord part_h;
-			int tmp_w;
-			int tmp_h;
+			Evas_Coord tmp_w;
+			Evas_Coord tmp_h;
 
-			edje_object_part_geometry_get(edje, part, NULL, NULL, &part_w, &part_h);
+			if (img_opt.width >= 0 && img_opt.height >= 0) {
+				part_w = img_opt.width;
+				part_h = img_opt.height;
+			} else {
+				edje_object_part_geometry_get(edje, part, NULL, NULL, &part_w, &part_h);
+			}
+			evas_object_data_set(img, "part_w", (void *)part_w);
+			evas_object_data_set(img, "part_h", (void *)part_h);
 			DbgPrint("Original %dx%d (part: %dx%d)\n", w, h, part_w, part_h);
 
 			tmp_w = part_w - w;
@@ -457,41 +519,49 @@ PUBLIC int script_update_image(void *_h, Evas *e, const char *id, const char *pa
 
 			if (abs(tmp_w) > abs(tmp_h)) {
 				if (tmp_w > 0) {
-					w = part_w;
+					DbgPrint("Before: (h = %d * %d / %d)\n", part_w, h, w);
 					h = (int)((double)part_w * (double)h / (double)w);
+					w = part_w;
+					DbgPrint("Size: %dx%d\n", w, h);
 				}
-
-				evas_object_size_hint_aspect_set(img, EVAS_ASPECT_CONTROL_VERTICAL, w, h);
 			} else {
 				if (tmp_h > 0) {
-					h = part_h;
+					DbgPrint("Before: (w = %d * %d / %d)\n", part_h, w, h);
 					w = (int)((double)part_h * (double)w / (double)h);
+					h = part_h;
+					DbgPrint("Size: %dx%d\n", w, h);
 				}
-
-				evas_object_size_hint_aspect_set(img, EVAS_ASPECT_CONTROL_HORIZONTAL, w, h);
 			}
 
-			evas_object_image_fill_set(img, 0, 0, w, h);
-			evas_object_size_hint_min_set(img, w, h);
-			evas_object_size_hint_max_set(img, w, h);
+			evas_object_data_set(img, "w", (void *)w);
+			evas_object_data_set(img, "h", (void *)h);
+			evas_object_image_load_size_set(img, w, h);
+			evas_object_image_load_region_set(img, (w - part_w) / 2, (h - part_h) / 2, part_w, part_h);
+			evas_object_image_reload(img);
+			evas_object_event_callback_add(img, EVAS_CALLBACK_RESIZE, cropped_resize_cb, NULL);
 		} else {
 			evas_object_image_fill_set(img, 0, 0, w, h);
 			evas_object_size_hint_fill_set(img, EVAS_HINT_FILL, EVAS_HINT_FILL);
 			evas_object_size_hint_aspect_set(img, EVAS_ASPECT_CONTROL_BOTH, w, h);
 		}
 	} else {
+		if (img_opt.width >= 0 && img_opt.height >= 0) {
+			w = img_opt.width;
+			h = img_opt.height;
+			DbgPrint("Using given image size: %dx%d\n", w, h);
+		}
+
 		evas_object_image_fill_set(img, 0, 0, w, h);
 		evas_object_size_hint_fill_set(img, EVAS_HINT_FILL, EVAS_HINT_FILL);
 		evas_object_size_hint_weight_set(img, EVAS_HINT_EXPAND, EVAS_HINT_EXPAND);
 	}
-
-	evas_object_resize(img, w, h);
 
 	/*!
 	 * \note
 	 * object will be shown by below statement automatically
 	 */
 	DbgPrint("%s part swallow image %p (%dx%d)\n", part, img, w, h);
+	child->obj = img;
 	edje_object_part_swallow(edje, part, img);
 	obj_info->children = eina_list_append(obj_info->children, child);
 
