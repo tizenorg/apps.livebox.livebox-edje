@@ -45,6 +45,11 @@ extern void evas_common_font_cache_set(int size);
 struct image_option {
 	int orient;
 	int aspect;
+	enum {
+		FILL_DISABLE,
+		FILL_IN_SIZE,
+		FILL_OVER_SIZE,
+	} fill;
 };
 
 struct info {
@@ -220,6 +225,23 @@ static void parse_orient(struct image_option *img_opt, const char *value, int le
 	DbgPrint("Parsed ORIENT: %d\n", img_opt->aspect);
 }
 
+static void parse_fill(struct image_option *img_opt, const char *value, int len)
+{
+	while (len > 0 && *value == ' ') {
+		value++;
+		len--;
+	}
+
+	if (!strcasecmp(value, "in-size"))
+		img_opt->fill = FILL_IN_SIZE;
+	else if (!strcasecmp(value, "over-size"))
+		img_opt->fill = FILL_OVER_SIZE;
+	else
+		img_opt->fill = FILL_DISABLE;
+
+	DbgPrint("Parsed FILL: %d\n", img_opt->fill);
+}
+
 static inline void parse_image_option(const char *option, struct image_option *img_opt)
 {
 	const char *ptr;
@@ -230,12 +252,16 @@ static inline void parse_image_option(const char *option, struct image_option *i
 		void (*handler)(struct image_option *img_opt, const char *value, int len);
 	} cmd_list[] = {
 		{
-			.cmd = "aspect",
+			.cmd = "aspect", /* Keep the aspect ratio */
 			.handler = parse_aspect,
 		},
 		{
-			.cmd = "orient",
+			.cmd = "orient", /* Keep the orientation value: for the rotated images */
 			.handler = parse_orient,
+		},
+		{
+			.cmd = "fill", /* Fill the image to its container */
+			.handler = parse_fill, /* Value: in-size, over-size, disable(default) */
 		},
 	};
 	enum {
@@ -337,6 +363,7 @@ PUBLIC int script_update_image(void *_h, Evas *e, const char *id, const char *pa
 	struct image_option img_opt = {
 		.aspect = 0,
 		.orient = 0,
+		.fill = FILL_DISABLE,
 	};
 
 	edje = find_edje(handle, id);
@@ -415,19 +442,56 @@ PUBLIC int script_update_image(void *_h, Evas *e, const char *id, const char *pa
 	}
 
 	evas_object_image_size_get(img, &w, &h);
-	evas_object_image_fill_set(img, 0, 0, w, h);
-	evas_object_size_hint_fill_set(img, EVAS_HINT_FILL, EVAS_HINT_FILL);
-	if (img_opt.aspect)
-		evas_object_size_hint_aspect_set(img, EVAS_ASPECT_CONTROL_BOTH, w, h);
-	else
+	if (img_opt.aspect) {
+		if (img_opt.fill == FILL_OVER_SIZE) {
+			Evas_Coord part_w;
+			Evas_Coord part_h;
+			int tmp_w;
+			int tmp_h;
+
+			edje_object_part_geometry_get(edje, part, NULL, NULL, &part_w, &part_h);
+			DbgPrint("Original %dx%d (part: %dx%d)\n", w, h, part_w, part_h);
+
+			tmp_w = part_w - w;
+			tmp_h = part_h - h;
+
+			if (abs(tmp_w) > abs(tmp_h)) {
+				if (tmp_w > 0) {
+					w = part_w;
+					h = (int)((double)part_w * (double)h / (double)w);
+				}
+
+				evas_object_size_hint_aspect_set(img, EVAS_ASPECT_CONTROL_VERTICAL, w, h);
+			} else {
+				if (tmp_h > 0) {
+					h = part_h;
+					w = (int)((double)part_h * (double)w / (double)h);
+				}
+
+				evas_object_size_hint_aspect_set(img, EVAS_ASPECT_CONTROL_HORIZONTAL, w, h);
+			}
+
+			evas_object_image_fill_set(img, 0, 0, w, h);
+			evas_object_size_hint_min_set(img, w, h);
+			evas_object_size_hint_max_set(img, w, h);
+		} else {
+			evas_object_image_fill_set(img, 0, 0, w, h);
+			evas_object_size_hint_fill_set(img, EVAS_HINT_FILL, EVAS_HINT_FILL);
+			evas_object_size_hint_aspect_set(img, EVAS_ASPECT_CONTROL_BOTH, w, h);
+		}
+	} else {
+		evas_object_image_fill_set(img, 0, 0, w, h);
+		evas_object_size_hint_fill_set(img, EVAS_HINT_FILL, EVAS_HINT_FILL);
 		evas_object_size_hint_weight_set(img, EVAS_HINT_EXPAND, EVAS_HINT_EXPAND);
+	}
+
 	evas_object_resize(img, w, h);
 
 	/*!
 	 * \note
 	 * object will be shown by below statement automatically
 	 */
-	DbgPrint("%s part swallow image %p\n", part, img);
+	DbgPrint("%s part swallow image %p (%dx%d)\n", part, img, w, h);
 	edje_object_part_swallow(edje, part, img);
 	obj_info->children = eina_list_append(obj_info->children, child);
 
