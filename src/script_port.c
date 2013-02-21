@@ -35,6 +35,7 @@
 #include "script_port.h"
 
 #define TEXT_CLASS	"tizen"
+#define BASE_WIDTH	720.0f
 
 #define PUBLIC __attribute__((visibility("default")))
 
@@ -86,6 +87,14 @@ static struct {
 	.font = NULL,
 	.size = -100,
 };
+
+static inline double scale_get(void)
+{
+	int width;
+	int height;
+	ecore_x_window_size_get(0, &width, &height);
+	return (double)width / BASE_WIDTH;
+}
 
 /*!
  * \NOTE
@@ -314,6 +323,16 @@ static inline void parse_image_option(const char *option, struct image_option *i
 		return;
 
 	state = STATE_START;
+	/*!
+	 * \note
+	 * GCC 4.7 warnings uninitialized idx and tag value.
+	 * But it will be initialized by the state machine. :(
+	 * Anyway, I just reset idx and tag for reducing the GCC4.7 complains.
+	 */
+	idx = 0;
+	tag = 0;
+	cmd = NULL;
+	value = NULL;
 
 	for (ptr = option; state != STATE_END; ptr++) {
 		switch (state) {
@@ -384,26 +403,6 @@ static inline void parse_image_option(const char *option, struct image_option *i
 			break;
 		}
 	}
-}
-
-static void cropped_resize_cb(void *data, Evas *e, Evas_Object *obj, void *ei)
-{
-        Evas_Coord w;
-        Evas_Coord h;
-	int part_w;
-	int part_h;
-
-        /* grab image size */
-	part_w = (int)evas_object_data_get(obj, "part_w");
-	part_h = (int)evas_object_data_get(obj, "part_h");
-	w = (int)evas_object_data_get(obj, "w");
-	h = (int)evas_object_data_get(obj, "h");
-
-        /* grab base object dimensions */
-	evas_object_resize(obj, part_w, part_h);
-	evas_object_image_fill_set(obj, 0, 0, w, h);
-
-	DbgPrint("Cropped: %dx%d - %dx%d, ImageSize(%dx%d)\n", (w - part_w) / 2, (h - part_h) / 2, part_w, part_h, w, h);
 }
 
 PUBLIC int script_update_image(void *_h, Evas *e, const char *id, const char *part, const char *path, const char *option)
@@ -482,11 +481,11 @@ PUBLIC int script_update_image(void *_h, Evas *e, const char *id, const char *pa
 		return -EFAULT;
 	}
 
+	evas_object_image_preload(img, EINA_FALSE);
 	parse_image_option(option, &img_opt);
 	evas_object_image_load_orientation_set(img, img_opt.orient);
 
 	evas_object_image_file_set(img, path, NULL);
-
 	err = evas_object_image_load_error_get(img);
 	if (err != EVAS_LOAD_ERROR_NONE) {
 		ErrPrint("Load error: %s\n", evas_load_error_str(err));
@@ -501,44 +500,43 @@ PUBLIC int script_update_image(void *_h, Evas *e, const char *id, const char *pa
 		if (img_opt.fill == FILL_OVER_SIZE) {
 			Evas_Coord part_w;
 			Evas_Coord part_h;
-			Evas_Coord tmp_w;
-			Evas_Coord tmp_h;
 
 			if (img_opt.width >= 0 && img_opt.height >= 0) {
-				part_w = img_opt.width;
-				part_h = img_opt.height;
+				part_w = img_opt.width * scale_get();
+				part_h = img_opt.height * scale_get();
 			} else {
+				part_w = 0;
+				part_h = 0;
 				edje_object_part_geometry_get(edje, part, NULL, NULL, &part_w, &part_h);
 			}
-			evas_object_data_set(img, "part_w", (void *)part_w);
-			evas_object_data_set(img, "part_h", (void *)part_h);
 			DbgPrint("Original %dx%d (part: %dx%d)\n", w, h, part_w, part_h);
 
-			tmp_w = part_w - w;
-			tmp_h = part_h - h;
+			if (part_w > w || part_h > h) {
+				double fw;
+				double fh;
 
-			if (abs(tmp_w) > abs(tmp_h)) {
-				if (tmp_w > 0) {
-					DbgPrint("Before: (h = %d * %d / %d)\n", part_w, h, w);
-					h = (int)((double)part_w * (double)h / (double)w);
+				fw = (double)part_w / (double)w;
+				fh = (double)part_h / (double)h;
+
+				if (fw > fh) {
 					w = part_w;
-					DbgPrint("Size: %dx%d\n", w, h);
-				}
-			} else {
-				if (tmp_h > 0) {
-					DbgPrint("Before: (w = %d * %d / %d)\n", part_h, w, h);
-					w = (int)((double)part_h * (double)w / (double)h);
+					h = (double)h * fw;
+				} else {
 					h = part_h;
-					DbgPrint("Size: %dx%d\n", w, h);
+					w = (double)w * fh;
 				}
 			}
+			DbgPrint("Size: %dx%d\n", w, h);
 
+			evas_object_data_set(img, "part_w", (void *)part_w);
+			evas_object_data_set(img, "part_h", (void *)part_h);
 			evas_object_data_set(img, "w", (void *)w);
 			evas_object_data_set(img, "h", (void *)h);
+
 			evas_object_image_load_size_set(img, w, h);
 			evas_object_image_load_region_set(img, (w - part_w) / 2, (h - part_h) / 2, part_w, part_h);
+			evas_object_image_fill_set(img, 0, 0, part_w, part_h);
 			evas_object_image_reload(img);
-			evas_object_event_callback_add(img, EVAS_CALLBACK_RESIZE, cropped_resize_cb, NULL);
 		} else {
 			evas_object_image_fill_set(img, 0, 0, w, h);
 			evas_object_size_hint_fill_set(img, EVAS_HINT_FILL, EVAS_HINT_FILL);
@@ -1003,6 +1001,7 @@ PUBLIC int script_init(void)
 	int ret;
 	/* ecore is already initialized */
 	edje_init();
+	edje_scale_set(scale_get());
 
 	s_info.property_handler = ecore_event_handler_add(ECORE_X_EVENT_WINDOW_PROPERTY, property_cb, NULL);
 	if (!s_info.property_handler)
@@ -1021,7 +1020,6 @@ PUBLIC int script_init(void)
 
 PUBLIC int script_fini(void)
 {
-
 	vconf_ignore_key_changed("db/setting/accessibility/font_name", font_name_cb);
 	vconf_ignore_key_changed(VCONFKEY_SETAPPL_ACCESSIBILITY_FONT_SIZE, font_size_cb);
 	ecore_event_handler_del(s_info.property_handler);
