@@ -528,11 +528,6 @@ PUBLIC int script_update_image(void *_h, Evas *e, const char *id, const char *pa
 			}
 			DbgPrint("Size: %dx%d\n", w, h);
 
-			evas_object_data_set(img, "part_w", (void *)part_w);
-			evas_object_data_set(img, "part_h", (void *)part_h);
-			evas_object_data_set(img, "w", (void *)w);
-			evas_object_data_set(img, "h", (void *)h);
-
 			evas_object_image_load_size_set(img, w, h);
 			evas_object_image_load_region_set(img, (w - part_w) / 2, (h - part_h) / 2, part_w, part_h);
 			evas_object_image_fill_set(img, 0, 0, part_w, part_h);
@@ -683,7 +678,6 @@ PUBLIC int script_update_script(void *h, Evas *e, const char *src_id, const char
 		return -EFAULT;
 	}
 
-	//edje_object_text_class_set(obj, TEXT_CLASS, s_info.font, s_info.size);
 	if (!edje_object_file_set(obj, path, group)) {
  		int err;
 		const char *errmsg;
@@ -886,7 +880,6 @@ PUBLIC int script_load(void *_handle, Evas *e, int w, int h)
 		return -EFAULT;
 	}
 
-	//edje_object_text_class_set(edje, TEXT_CLASS, s_info.font, s_info.size);
 	DbgPrint("Load edje: %s - %s\n", handle->file, handle->group);
 	if (!edje_object_file_set(edje, handle->file, handle->group)) {
  		int err;
@@ -931,41 +924,55 @@ PUBLIC int script_unload(void *_handle, Evas *e)
 	return 0;
 }
 
+static inline int update_font(const char *font)
+{
+	Eina_List *list;
+	char *text;
+	int cache;
+
+	cache = evas_common_font_cache_get();
+	evas_common_font_cache_set(0);
+	evas_common_font_flush();
+
+	list = edje_text_class_list();
+	EINA_LIST_FREE(list, text) {
+		if (!strncasecmp(text, TEXT_CLASS, strlen(TEXT_CLASS))) {
+			edje_text_class_del(text);
+			edje_text_class_set(text, s_info.font, s_info.size);
+			DbgPrint("Update text class %s (%s, %d)\n", text, s_info.font, s_info.size);
+		} else {
+			DbgPrint("Skip text class %s\n", text);
+		}
+	}
+	DbgPrint("Font for text_class is updated\n");
+
+	evas_common_font_cache_set(cache);
+	return 0;
+}
+
 static Eina_Bool property_cb(void *data, int type, void *event)
 {
 	Ecore_X_Event_Window_Property *info = (Ecore_X_Event_Window_Property *)event;
 
 	if (info->atom == ecore_x_atom_get("FONT_TYPE_change") || info->atom == ecore_x_atom_get("BADA_FONT_change")) {
-		Eina_List *list;
-		char *text;
 		char *font;
-		int cache;
 
 		font = vconf_get_str("db/setting/accessibility/font_name");
 		if (!font)
 			return ECORE_CALLBACK_PASS_ON;
+
+		if (s_info.font && !strcmp(s_info.font, font)) {
+			DbgPrint("Font is not changed (%s)\n", font);
+			free(font);
+			return ECORE_CALLBACK_PASS_ON;
+		}
 
 		if (s_info.font)
 			free(s_info.font);
 
 		s_info.font = font;
 
-		cache = evas_common_font_cache_get();
-		evas_common_font_cache_set(0);
-		evas_common_font_flush();
-
-		list = edje_text_class_list();
-		EINA_LIST_FREE(list, text) {
-			if (!strncasecmp(text, TEXT_CLASS, strlen(TEXT_CLASS))) {
-				edje_text_class_del(text);
-				edje_text_class_set(text, s_info.font, s_info.size);
-				DbgPrint("Update text class %s (%s, %d)\n", text, s_info.font, s_info.size);
-			} else {
-				DbgPrint("Skip text class %s\n", text);
-			}
-		}
-
-		evas_common_font_cache_set(cache);
+		update_font(font);
 	}
 
 	return ECORE_CALLBACK_PASS_ON;
@@ -982,7 +989,21 @@ static void font_name_cb(keynode_t *node, void *user_data)
 	if (!font)
 		return;
 
+	if (s_info.font && !strcmp(s_info.font, font)) {
+		DbgPrint("Font is not changed\n");
+		return;
+	}
+
 	DbgPrint("Font changed to %s\n", font);
+
+	if (s_info.font)
+		free(s_info.font);
+
+	s_info.font = strdup(font);
+	if (!s_info.font)
+		ErrPrint("Heap: %s\n", strerror(errno));
+
+	update_font(font);
 }
 
 static void font_size_cb(keynode_t *node, void *user_data)
