@@ -1,5 +1,5 @@
 /*
- * Copyright 2012  Samsung Electronics Co., Ltd
+ * Copyright 2013  Samsung Electronics Co., Ltd
  *
  * Licensed under the Flora License, Version 1.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -31,6 +31,7 @@
 #include <dlog.h>
 #include <debug.h>
 #include <vconf.h>
+#include <livebox-errno.h>
 
 #include "script_port.h"
 
@@ -176,7 +177,7 @@ PUBLIC int script_update_color(void *h, Evas *e, const char *id, const char *par
 
 	edje = find_edje(handle, id);
 	if (!edje)
-		return -ENOENT;
+		return LB_STATUS_ERROR_NOT_EXIST;
 
 	ret = sscanf(rgba, "%d %d %d %d %d %d %d %d %d %d %d %d",
 					r, g, b, a,			/* OBJECT */
@@ -184,7 +185,7 @@ PUBLIC int script_update_color(void *h, Evas *e, const char *id, const char *par
 					r + 2, g + 2, b + 2, a + 2);	/* SHADOW */
 	if (ret != 12) {
 		DbgPrint("id[%s] part[%s] rgba[%s]\n", id, part, rgba);
-		return -EINVAL;
+		return LB_STATUS_ERROR_INVALID;
 	}
 
 	ret = edje_object_color_class_set(edje, part,
@@ -193,7 +194,7 @@ PUBLIC int script_update_color(void *h, Evas *e, const char *id, const char *par
 				r[2], g[2], b[2], a[2]); /* SHADOW */
 
 	DbgPrint("EDJE[%s] color class is %s changed", id, ret == EINA_TRUE ? "successfully" : "not");
-	return 0;
+	return LB_STATUS_SUCCESS;
 }
 
 PUBLIC int script_update_text(void *h, Evas *e, const char *id, const char *part, const char *text)
@@ -203,10 +204,10 @@ PUBLIC int script_update_text(void *h, Evas *e, const char *id, const char *part
 
 	edje = find_edje(handle, id);
 	if (!edje)
-		return -ENOENT;
+		return LB_STATUS_ERROR_NOT_EXIST;
 
 	edje_object_part_text_set(edje, part, text);
-	return 0;
+	return LB_STATUS_SUCCESS;
 }
 
 static void parse_aspect(struct image_option *img_opt, const char *value, int len)
@@ -425,13 +426,13 @@ PUBLIC int script_update_image(void *_h, Evas *e, const char *id, const char *pa
 	edje = find_edje(handle, id);
 	if (!edje) {
 		ErrPrint("No such object: %s\n", id);
-		return -ENOENT;
+		return LB_STATUS_ERROR_NOT_EXIST;
 	}
 
 	obj_info = evas_object_data_get(edje, "obj_info");
 	if (!obj_info) {
 		ErrPrint("Object info is not available\n");
-		return -EFAULT;
+		return LB_STATUS_ERROR_FAULT;
 	}
 
 	img = edje_object_part_swallow_get(edje, part);
@@ -457,20 +458,20 @@ PUBLIC int script_update_image(void *_h, Evas *e, const char *id, const char *pa
 
 	if (!path || !strlen(path) || access(path, R_OK) != 0) {
 		DbgPrint("SKIP - Path: [%s]\n", path);
-		return 0;
+		return LB_STATUS_SUCCESS;
 	}
 
 	child = malloc(sizeof(*child));
 	if (!child) {
 		ErrPrint("Heap: %s\n", strerror(errno));
-		return -ENOMEM;
+		return LB_STATUS_ERROR_MEMORY;
 	}
 
 	child->part = strdup(part);
 	if (!child->part) {
 		ErrPrint("Heap: %s\n", strerror(errno));
 		free(child);
-		return -ENOMEM;
+		return LB_STATUS_ERROR_MEMORY;
 	}
 
 	img = evas_object_image_add(e);
@@ -478,7 +479,7 @@ PUBLIC int script_update_image(void *_h, Evas *e, const char *id, const char *pa
 		ErrPrint("Failed to add an image object\n");
 		free(child->part);
 		free(child);
-		return -EFAULT;
+		return LB_STATUS_ERROR_FAULT;
 	}
 
 	evas_object_image_preload(img, EINA_FALSE);
@@ -492,7 +493,7 @@ PUBLIC int script_update_image(void *_h, Evas *e, const char *id, const char *pa
 		evas_object_del(img);
 		free(child->part);
 		free(child);
-		return -EIO;
+		return LB_STATUS_ERROR_IO;
 	}
 
 	evas_object_image_size_get(img, &w, &h);
@@ -558,7 +559,7 @@ PUBLIC int script_update_image(void *_h, Evas *e, const char *id, const char *pa
 	edje_object_part_swallow(edje, part, img);
 	obj_info->children = eina_list_append(obj_info->children, child);
 
-	return 0;
+	return LB_STATUS_SUCCESS;
 }
 
 static void script_signal_cb(void *data, Evas_Object *obj, const char *emission, const char *source)
@@ -637,13 +638,13 @@ PUBLIC int script_update_script(void *h, Evas *e, const char *src_id, const char
 	edje = find_edje(handle, src_id);
 	if (!edje) {
 		ErrPrint("Edje is not exists\n");
-		return -ENOENT;
+		return LB_STATUS_ERROR_NOT_EXIST;
 	}
 
 	obj_info = evas_object_data_get(edje, "obj_info");
 	if (!obj_info) {
 		ErrPrint("Object info is not valid\n");
-		return -EINVAL;
+		return LB_STATUS_ERROR_INVALID;
 	}
 
 	obj = edje_object_part_swallow_get(edje, part);
@@ -669,13 +670,13 @@ PUBLIC int script_update_script(void *h, Evas *e, const char *src_id, const char
 
 	if (!path || !strlen(path) || access(path, R_OK) != 0) {
 		DbgPrint("SKIP - Path: [%s]\n", path);
-		return 0;
+		return LB_STATUS_SUCCESS;
 	}
 
 	obj = edje_object_add(e);
 	if (!obj) {
 		ErrPrint("Failed to add a new edje object\n");
-		return -EFAULT;
+		return LB_STATUS_ERROR_FAULT;
 	}
 
 	if (!edje_object_file_set(obj, path, group)) {
@@ -686,7 +687,7 @@ PUBLIC int script_update_script(void *h, Evas *e, const char *src_id, const char
 		errmsg = edje_load_error_str(err);
 		ErrPrint("Could not load %s from %s: %s\n", group, path, errmsg);
 		evas_object_del(obj);
-		return -EIO;
+		return LB_STATUS_ERROR_IO;
 	}
 
 	evas_object_show(obj);
@@ -695,7 +696,7 @@ PUBLIC int script_update_script(void *h, Evas *e, const char *src_id, const char
 	if (!obj_info) {
 		ErrPrint("Failed to add a obj_info\n");
 		evas_object_del(obj);
-		return -ENOMEM;
+		return LB_STATUS_ERROR_MEMORY;
 	}
 
 	obj_info->id = strdup(target_id);
@@ -703,7 +704,7 @@ PUBLIC int script_update_script(void *h, Evas *e, const char *src_id, const char
 		ErrPrint("Failed to add a obj_info\n");
 		free(obj_info);
 		evas_object_del(obj);
-		return -ENOMEM;
+		return LB_STATUS_ERROR_MEMORY;
 	}
 
 	child = malloc(sizeof(*child));
@@ -712,7 +713,7 @@ PUBLIC int script_update_script(void *h, Evas *e, const char *src_id, const char
 		free(obj_info->id);
 		free(obj_info);
 		evas_object_del(obj);
-		return -ENOMEM;
+		return LB_STATUS_ERROR_MEMORY;
 	}
 
 	child->part = strdup(part);
@@ -722,7 +723,7 @@ PUBLIC int script_update_script(void *h, Evas *e, const char *src_id, const char
 		free(obj_info->id);
 		free(obj_info);
 		evas_object_del(obj);
-		return -ENOMEM;
+		return LB_STATUS_ERROR_MEMORY;
 	}
 
 	child->obj = obj;
@@ -736,7 +737,7 @@ PUBLIC int script_update_script(void *h, Evas *e, const char *src_id, const char
 	edje_object_part_swallow(edje, part, obj);
 	obj_info = evas_object_data_get(edje, "obj_info");
 	obj_info->children = eina_list_append(obj_info->children, child);
-	return 0;
+	return LB_STATUS_SUCCESS;
 }
 
 PUBLIC int script_update_signal(void *h, Evas *e, const char *id, const char *part, const char *signal)
@@ -748,10 +749,10 @@ PUBLIC int script_update_signal(void *h, Evas *e, const char *id, const char *pa
 
 	edje = find_edje(handle, id);
 	if (!edje)
-		return -ENOENT;
+		return LB_STATUS_ERROR_NOT_EXIST;
 
 	edje_object_signal_emit(edje, signal, part);
-	return 0;
+	return LB_STATUS_SUCCESS;
 }
 
 PUBLIC int script_update_drag(void *h, Evas *e, const char *id, const char *part, double x, double y)
@@ -763,10 +764,10 @@ PUBLIC int script_update_drag(void *h, Evas *e, const char *id, const char *part
 
 	edje = find_edje(handle, id);
 	if (!edje)
-		return -ENOENT;
+		return LB_STATUS_ERROR_NOT_EXIST;
 
 	edje_object_part_drag_value_set(edje, part, x, y);
-	return 0;
+	return LB_STATUS_SUCCESS;
 }
 
 PUBLIC int script_update_size(void *han, Evas *e, const char *id, int w, int h)
@@ -776,7 +777,7 @@ PUBLIC int script_update_size(void *han, Evas *e, const char *id, int w, int h)
 
 	edje = find_edje(handle, id);
 	if (!edje)
-		return -ENOENT;
+		return LB_STATUS_ERROR_NOT_EXIST;
 
 	if (!id) {
 		handle->w = w;
@@ -785,7 +786,7 @@ PUBLIC int script_update_size(void *han, Evas *e, const char *id, int w, int h)
 
 	DbgPrint("Resize object to %dx%d\n", w, h);
 	evas_object_resize(edje, w, h);
-	return 0;
+	return LB_STATUS_SUCCESS;
 }
 
 PUBLIC int script_update_category(void *h, Evas *e, const char *id, const char *category)
@@ -800,15 +801,15 @@ PUBLIC int script_update_category(void *h, Evas *e, const char *id, const char *
 	}
 
 	if (!category)
-		return 0;
+		return LB_STATUS_SUCCESS;
 
 	handle->category = strdup(category);
 	if (!handle->category) {
 		ErrPrint("Error: %s\n", strerror(errno));
-		return -ENOMEM;
+		return LB_STATUS_ERROR_MEMORY;
 	}
 
-	return 0;
+	return LB_STATUS_SUCCESS;
 }
 
 PUBLIC void *script_create(const char *file, const char *group)
@@ -856,7 +857,7 @@ PUBLIC int script_destroy(void *_handle)
 	free(handle->file);
 	free(handle->group);
 	free(handle);
-	return 0;
+	return LB_STATUS_SUCCESS;
 }
 
 PUBLIC int script_load(void *_handle, Evas *e, int w, int h)
@@ -870,14 +871,14 @@ PUBLIC int script_load(void *_handle, Evas *e, int w, int h)
 	obj_info = calloc(1, sizeof(*obj_info));
 	if (!obj_info) {
 		ErrPrint("Heap: %s\n", strerror(errno));
-		return -ENOMEM;
+		return LB_STATUS_ERROR_MEMORY;
 	}
 
 	edje = edje_object_add(e);
 	if (!edje) {
 		ErrPrint("Failed to create an edje object\n");
 		free(obj_info);
-		return -EFAULT;
+		return LB_STATUS_ERROR_FAULT;
 	}
 
 	DbgPrint("Load edje: %s - %s\n", handle->file, handle->group);
@@ -890,7 +891,7 @@ PUBLIC int script_load(void *_handle, Evas *e, int w, int h)
 		ErrPrint("Could not load %s from %s: %s\n", handle->group, handle->file, errmsg);
 		evas_object_del(edje);
 		free(obj_info);
-		return -EIO;
+		return LB_STATUS_ERROR_IO;
 	}
 
 	handle->e = e;
@@ -906,7 +907,7 @@ PUBLIC int script_load(void *_handle, Evas *e, int w, int h)
 	evas_object_data_set(edje, "obj_info", obj_info);
 
 	handle->obj_list = eina_list_append(handle->obj_list, edje);
-	return 0;
+	return LB_STATUS_SUCCESS;
 }
 
 PUBLIC int script_unload(void *_handle, Evas *e)
@@ -921,7 +922,7 @@ PUBLIC int script_unload(void *_handle, Evas *e)
 	if (edje)
 		evas_object_del(edje);
 	handle->e = NULL;
-	return 0;
+	return LB_STATUS_SUCCESS;
 }
 
 static inline int update_font(const char *font)
@@ -947,7 +948,7 @@ static inline int update_font(const char *font)
 	DbgPrint("Font for text_class is updated\n");
 
 	evas_common_font_cache_set(cache);
-	return 0;
+	return LB_STATUS_SUCCESS;
 }
 
 static Eina_Bool property_cb(void *data, int type, void *event)
@@ -1036,7 +1037,7 @@ PUBLIC int script_init(void)
 	if (ret < 0)
 		ErrPrint("Failed to add vconf for font name change\n");
 
-	return 0;
+	return LB_STATUS_SUCCESS;
 }
 
 PUBLIC int script_fini(void)
@@ -1046,7 +1047,7 @@ PUBLIC int script_fini(void)
 	ecore_event_handler_del(s_info.property_handler);
 	s_info.property_handler = NULL;
 	edje_shutdown();
-	return 0;
+	return LB_STATUS_SUCCESS;
 }
 
 /* End of a file */

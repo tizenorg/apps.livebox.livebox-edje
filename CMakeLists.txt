@@ -11,6 +11,7 @@ pkg_check_modules(live_edje REQUIRED
 	ecore-x
 	ecore
 	vconf
+	livebox-service
 )
 
 FOREACH (flag ${live_edje_CFLAGS})
