@@ -20,6 +20,7 @@
 #include <unistd.h>
 #include <ctype.h>
 
+#include <Elementary.h>
 #include <Evas.h>
 #include <Edje.h>
 #include <Eina.h>
@@ -39,10 +40,6 @@
 #define BASE_WIDTH	720.0f
 
 #define PUBLIC __attribute__((visibility("default")))
-
-extern void evas_common_font_flush(void);
-extern int evas_common_font_cache_get(void);
-extern void evas_common_font_cache_set(int size);
 
 struct image_option {
 	int orient;
@@ -77,16 +74,7 @@ struct child {
 struct obj_info {
 	char *id;
 	Eina_List *children;
-};
-
-static struct {
-	Ecore_Event_Handler *property_handler;
-	char *font;
-	int size;
-} s_info = {
-	.property_handler = NULL,
-	.font = NULL,
-	.size = -100,
+	Evas_Object *win;
 };
 
 static inline double scale_get(void)
@@ -96,42 +84,6 @@ static inline double scale_get(void)
 	ecore_x_window_size_get(0, &width, &height);
 	return (double)width / BASE_WIDTH;
 }
-
-/*!
- * \NOTE
- * Reservce this for future use
-static inline void common_cache_flush(void *evas)
-{
-	int file_cache;
-	int collection_cache;
-	int image_cache;
-	int font_cache;
-
-	file_cache = edje_file_cache_get();
-	collection_cache = edje_collection_cache_get();
-	image_cache = evas_image_cache_get(evas);
-	font_cache = evas_font_cache_get(evas);
-
-	edje_file_cache_set(file_cache);
-	edje_collection_cache_set(collection_cache);
-	evas_image_cache_set(evas, 0);
-	evas_font_cache_set(evas, 0);
-
-	evas_image_cache_flush(evas);
-	evas_render_idle_flush(evas);
-	evas_font_cache_flush(evas);
-
-	edje_file_cache_flush();
-	edje_collection_cache_flush();
-
-	edje_file_cache_set(file_cache);
-	edje_collection_cache_set(collection_cache);
-	evas_image_cache_set(evas, image_cache);
-	evas_font_cache_set(evas, font_cache);
-
-	eet_clearcache();
-}
- */
 
 static inline Evas_Object *find_edje(struct info *handle, const char *id)
 {
@@ -188,7 +140,7 @@ PUBLIC int script_update_color(void *h, Evas *e, const char *id, const char *par
 		return LB_STATUS_ERROR_INVALID;
 	}
 
-	ret = edje_object_color_class_set(edje, part,
+	ret = edje_object_color_class_set(elm_layout_edje_get(edje), part,
 				r[0], g[0], b[0], a[0], /* OBJECT */
 				r[1], g[1], b[1], a[1], /* OUTLINE */
 				r[2], g[2], b[2], a[2]); /* SHADOW */
@@ -206,7 +158,7 @@ PUBLIC int script_update_text(void *h, Evas *e, const char *id, const char *part
 	if (!edje)
 		return LB_STATUS_ERROR_NOT_EXIST;
 
-	edje_object_part_text_set(edje, part, text);
+	elm_object_part_text_set(edje, part, text);
 	return LB_STATUS_SUCCESS;
 }
 
@@ -435,12 +387,10 @@ PUBLIC int script_update_image(void *_h, Evas *e, const char *id, const char *pa
 		return LB_STATUS_ERROR_FAULT;
 	}
 
-	img = edje_object_part_swallow_get(edje, part);
+	img = elm_object_part_content_unset(edje, part);
 	if (img) {
 		Eina_List *l;
 		Eina_List *n;
-
-		edje_object_part_unswallow(edje, img);
 
 		EINA_LIST_FOREACH_SAFE(obj_info->children, l, n, child) {
 			if (child->obj != img)
@@ -508,7 +458,7 @@ PUBLIC int script_update_image(void *_h, Evas *e, const char *id, const char *pa
 			} else {
 				part_w = 0;
 				part_h = 0;
-				edje_object_part_geometry_get(edje, part, NULL, NULL, &part_w, &part_h);
+				edje_object_part_geometry_get(elm_layout_edje_get(edje), part, NULL, NULL, &part_w, &part_h);
 			}
 			DbgPrint("Original %dx%d (part: %dx%d)\n", w, h, part_w, part_h);
 
@@ -556,7 +506,7 @@ PUBLIC int script_update_image(void *_h, Evas *e, const char *id, const char *pa
 	 */
 	DbgPrint("%s part swallow image %p (%dx%d)\n", part, img, w, h);
 	child->obj = img;
-	edje_object_part_swallow(edje, part, img);
+	elm_object_part_content_set(edje, part, img);
 	obj_info->children = eina_list_append(obj_info->children, child);
 
 	return LB_STATUS_SUCCESS;
@@ -577,7 +527,7 @@ static void script_signal_cb(void *data, Evas_Object *obj, const char *emission,
 	double ey;
 
 	evas_object_geometry_get(obj, NULL, NULL, &w, &h);
-	edje_object_part_geometry_get(obj, source, &px, &py, &pw, &ph);
+	edje_object_part_geometry_get(elm_layout_edje_get(obj), source, &px, &py, &pw, &ph);
 
 	sx = ex = 0.0f;
 	if (w) {
@@ -611,7 +561,7 @@ static void edje_del_cb(void *_info, Evas *e, Evas_Object *obj, void *event_info
 
 	DbgPrint("delete object %s %p\n", obj_info->id, obj);
 
-	edje_object_signal_callback_del_full(obj, "*", "*", script_signal_cb, handle);
+	elm_object_signal_callback_del(obj, "*", "*", script_signal_cb);
 
 	EINA_LIST_FREE(obj_info->children, child) {
 		DbgPrint("delete object %s %p\n", child->part, child->obj);
@@ -647,12 +597,10 @@ PUBLIC int script_update_script(void *h, Evas *e, const char *src_id, const char
 		return LB_STATUS_ERROR_INVALID;
 	}
 
-	obj = edje_object_part_swallow_get(edje, part);
+	obj = elm_object_part_content_unset(edje, part);
 	if (obj) {
 		Eina_List *l;
 		Eina_List *n;
-
-		edje_object_part_unswallow(edje, obj);
 
 		EINA_LIST_FOREACH_SAFE(obj_info->children, l, n, child) {
 			if (child->obj != obj)
@@ -673,17 +621,17 @@ PUBLIC int script_update_script(void *h, Evas *e, const char *src_id, const char
 		return LB_STATUS_SUCCESS;
 	}
 
-	obj = edje_object_add(e);
+	obj = elm_layout_add(edje);
 	if (!obj) {
 		ErrPrint("Failed to add a new edje object\n");
 		return LB_STATUS_ERROR_FAULT;
 	}
 
-	if (!edje_object_file_set(obj, path, group)) {
+	if (!elm_layout_file_set(obj, path, group)) {
  		int err;
 		const char *errmsg;
 
-		err = edje_object_load_error_get(obj);
+		err = edje_object_load_error_get(elm_layout_edje_get(obj));
 		errmsg = edje_load_error_str(err);
 		ErrPrint("Could not load %s from %s: %s\n", group, path, errmsg);
 		evas_object_del(obj);
@@ -730,11 +678,11 @@ PUBLIC int script_update_script(void *h, Evas *e, const char *src_id, const char
 
 	evas_object_data_set(obj, "obj_info", obj_info);
 	evas_object_event_callback_add(obj, EVAS_CALLBACK_DEL, edje_del_cb, handle);
-	edje_object_signal_callback_add(obj, "*", "*", script_signal_cb, handle);
+	elm_object_signal_callback_add(obj, "*", "*", script_signal_cb, handle);
 	handle->obj_list = eina_list_append(handle->obj_list, obj);
 
 	DbgPrint("%s part swallow edje %p\n", part, obj);
-	edje_object_part_swallow(edje, part, obj);
+	elm_object_part_content_set(edje, part, obj);
 	obj_info = evas_object_data_get(edje, "obj_info");
 	obj_info->children = eina_list_append(obj_info->children, child);
 	return LB_STATUS_SUCCESS;
@@ -751,7 +699,7 @@ PUBLIC int script_update_signal(void *h, Evas *e, const char *id, const char *pa
 	if (!edje)
 		return LB_STATUS_ERROR_NOT_EXIST;
 
-	edje_object_signal_emit(edje, signal, part);
+	elm_object_signal_emit(edje, signal, part);
 	return LB_STATUS_SUCCESS;
 }
 
@@ -766,7 +714,7 @@ PUBLIC int script_update_drag(void *h, Evas *e, const char *id, const char *part
 	if (!edje)
 		return LB_STATUS_ERROR_NOT_EXIST;
 
-	edje_object_part_drag_value_set(edje, part, x, y);
+	edje_object_part_drag_value_set(elm_layout_edje_get(edje), part, x, y);
 	return LB_STATUS_SUCCESS;
 }
 
@@ -874,22 +822,30 @@ PUBLIC int script_load(void *_handle, Evas *e, int w, int h)
 		return LB_STATUS_ERROR_MEMORY;
 	}
 
-	edje = edje_object_add(e);
+	obj_info->win = evas_object_rectangle_add(e);
+	if (!obj_info->win) {
+		free(obj_info);
+		return LB_STATUS_ERROR_FAULT;
+	}
+
+	edje = elm_layout_add(obj_info->win);
 	if (!edje) {
 		ErrPrint("Failed to create an edje object\n");
+		evas_object_del(obj_info->win);
 		free(obj_info);
 		return LB_STATUS_ERROR_FAULT;
 	}
 
 	DbgPrint("Load edje: %s - %s\n", handle->file, handle->group);
-	if (!edje_object_file_set(edje, handle->file, handle->group)) {
+	if (!elm_layout_file_set(edje, handle->file, handle->group)) {
  		int err;
 		const char *errmsg;
 
-		err = edje_object_load_error_get(edje);
+		err = edje_object_load_error_get(elm_layout_edje_get(edje));
 		errmsg = edje_load_error_str(err);
 		ErrPrint("Could not load %s from %s: %s\n", handle->group, handle->file, errmsg);
 		evas_object_del(edje);
+		evas_object_del(obj_info->win);
 		free(obj_info);
 		return LB_STATUS_ERROR_IO;
 	}
@@ -898,7 +854,7 @@ PUBLIC int script_load(void *_handle, Evas *e, int w, int h)
 	handle->w = w;
 	handle->h = h;
 
-	edje_object_signal_callback_add(edje, "*", "*", script_signal_cb, handle);
+	elm_object_signal_callback_add(edje, "*", "*", script_signal_cb, handle);
 	evas_object_event_callback_add(edje, EVAS_CALLBACK_DEL, edje_del_cb, handle);
 	evas_object_size_hint_weight_set(edje, EVAS_HINT_EXPAND, EVAS_HINT_EXPAND);
 	evas_object_size_hint_fill_set(edje, EVAS_HINT_FILL, EVAS_HINT_FILL);
@@ -925,128 +881,22 @@ PUBLIC int script_unload(void *_handle, Evas *e)
 	return LB_STATUS_SUCCESS;
 }
 
-static inline int update_font(const char *font)
-{
-	Eina_List *list;
-	char *text;
-	int cache;
-
-	cache = evas_common_font_cache_get();
-	evas_common_font_cache_set(0);
-	evas_common_font_flush();
-
-	list = edje_text_class_list();
-	EINA_LIST_FREE(list, text) {
-		if (!strncasecmp(text, TEXT_CLASS, strlen(TEXT_CLASS))) {
-			edje_text_class_del(text);
-			edje_text_class_set(text, s_info.font, s_info.size);
-			DbgPrint("Update text class %s (%s, %d)\n", text, s_info.font, s_info.size);
-		} else {
-			DbgPrint("Skip text class %s\n", text);
-		}
-	}
-	DbgPrint("Font for text_class is updated\n");
-
-	evas_common_font_cache_set(cache);
-	return LB_STATUS_SUCCESS;
-}
-
-static Eina_Bool property_cb(void *data, int type, void *event)
-{
-	Ecore_X_Event_Window_Property *info = (Ecore_X_Event_Window_Property *)event;
-
-	if (info->atom == ecore_x_atom_get("FONT_TYPE_change") || info->atom == ecore_x_atom_get("BADA_FONT_change")) {
-		char *font;
-
-		font = vconf_get_str("db/setting/accessibility/font_name");
-		if (!font)
-			return ECORE_CALLBACK_PASS_ON;
-
-		if (s_info.font && !strcmp(s_info.font, font)) {
-			DbgPrint("Font is not changed (%s)\n", font);
-			free(font);
-			return ECORE_CALLBACK_PASS_ON;
-		}
-
-		if (s_info.font)
-			free(s_info.font);
-
-		s_info.font = font;
-
-		update_font(font);
-	}
-
-	return ECORE_CALLBACK_PASS_ON;
-}
-
-static void font_name_cb(keynode_t *node, void *user_data)
-{
-	const char *font;
-
-	if (!node)
-		return;
-
-	font = vconf_keynode_get_str(node);
-	if (!font)
-		return;
-
-	if (s_info.font && !strcmp(s_info.font, font)) {
-		DbgPrint("Font is not changed\n");
-		return;
-	}
-
-	DbgPrint("Font changed to %s\n", font);
-
-	if (s_info.font)
-		free(s_info.font);
-
-	s_info.font = strdup(font);
-	if (!s_info.font)
-		ErrPrint("Heap: %s\n", strerror(errno));
-
-	update_font(font);
-}
-
-static void font_size_cb(keynode_t *node, void *user_data)
-{
-	if (!node)
-		return;
-	/*!
-	 * \TODO
-	 * Implementing me.
-	 */
-	DbgPrint("Size type: %d\n", vconf_keynode_get_int(node));
-}
-
 PUBLIC int script_init(void)
 {
-	int ret;
+	char *argv[] = {
+		"livebox.edje",
+		NULL,
+	};
 	/* ecore is already initialized */
-	edje_init();
-	edje_scale_set(scale_get());
-
-	s_info.property_handler = ecore_event_handler_add(ECORE_X_EVENT_WINDOW_PROPERTY, property_cb, NULL);
-	if (!s_info.property_handler)
-		ErrPrint("Failed to add a property change event handler\n");
-
-	ret = vconf_notify_key_changed(VCONFKEY_SETAPPL_ACCESSIBILITY_FONT_SIZE, font_size_cb, NULL);
-	if (ret < 0)
-		ErrPrint("Failed to add vconf for font size change\n");
-
-	ret = vconf_notify_key_changed("db/setting/accessibility/font_name", font_name_cb, NULL);
-	if (ret < 0)
-		ErrPrint("Failed to add vconf for font name change\n");
+	elm_init(1, argv);
+	elm_config_scale_set(scale_get());
 
 	return LB_STATUS_SUCCESS;
 }
 
 PUBLIC int script_fini(void)
 {
-	vconf_ignore_key_changed("db/setting/accessibility/font_name", font_name_cb);
-	vconf_ignore_key_changed(VCONFKEY_SETAPPL_ACCESSIBILITY_FONT_SIZE, font_size_cb);
-	ecore_event_handler_del(s_info.property_handler);
-	s_info.property_handler = NULL;
-	edje_shutdown();
+	elm_shutdown();
 	return LB_STATUS_SUCCESS;
 }
 

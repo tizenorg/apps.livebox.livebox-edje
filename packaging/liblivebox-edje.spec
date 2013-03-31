@@ -1,6 +1,6 @@
 Name: liblivebox-edje
 Summary: EDJE Script loader for the data provider master
-Version: 0.3.2
+Version: 0.4.0
 Release: 1
 Group: HomeTF/Livebox
 License: Flora License
@@ -14,6 +14,7 @@ BuildRequires: pkgconfig(eet)
 BuildRequires: pkgconfig(vconf)
 BuildRequires: pkgconfig(ecore-x)
 BuildRequires: pkgconfig(ecore)
+BuildRequires: pkgconfig(elementary)
 BuildRequires: pkgconfig(livebox-service)
 
 %description
