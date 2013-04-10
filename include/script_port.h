@@ -28,6 +28,7 @@ extern int script_signal_emit(Evas *e, const char *part, const char *signal, dou
 extern int script_update_color(void *h, Evas *e, const char *id, const char *part, const char *rgba);
 extern int script_update_text(void *h, Evas *e, const char *id, const char *part, const char *text);
 extern int script_update_image(void *h, Evas *e, const char *id, const char *part, const char *path, const char *option);
+extern int script_update_access(void *h, Evas *e, const char *id, const char *part, const char *text, const char *option);
 extern int script_update_script(void *h, Evas *e, const char *src_id, const char *target_id, const char *part, const char *path, const char *group);
 extern int script_update_signal(void *h, Evas *e, const char *id, const char *part, const char *signal);
 extern int script_update_drag(void *h, Evas *e, const char *id, const char *part, double x, double y);
@@ -39,6 +40,16 @@ extern int script_destroy(void *handle);
 
 extern int script_load(void *handle, Evas *e, int w, int h);
 extern int script_unload(void *handle, Evas *e);
+
+/*!
+	LB_ACCESS_HIGHLIGHT		0
+	LB_ACCESS_HIGHLIGHT_NEXT	1
+	LB_ACCESS_HIGHLIGHT_PREV	2
+	LB_ACCESS_ACTIVATE		3
+	LB_ACCESS_VALUE_CHANGE		4
+	LB_ACCESS_SCROLL		5
+*/
+extern int script_feed_event(void *h, Evas *e, int event_type, int x, int y, double timestamp);
 
 extern int script_init(void);
 extern int script_fini(void);

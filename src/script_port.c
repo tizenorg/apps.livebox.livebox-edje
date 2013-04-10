@@ -33,6 +33,7 @@
 #include <debug.h>
 #include <vconf.h>
 #include <livebox-errno.h>
+#include <livebox-service.h>
 
 #include "script_port.h"
 
@@ -75,6 +76,7 @@ struct obj_info {
 	char *id;
 	Eina_List *children;
 	Evas_Object *win;
+	Eina_List *access_chain;
 };
 
 static inline double scale_get(void)
@@ -115,6 +117,28 @@ static inline Evas_Object *find_edje(struct info *handle, const char *id)
 	return NULL;
 }
 
+static inline void rebuild_focus_chain(Evas_Object *obj)
+{
+	struct obj_info *obj_info;
+	Evas_Object *ao;
+	Eina_List *l;
+
+	obj_info = evas_object_data_get(obj, "obj_info");
+	if (!obj_info) {
+		ErrPrint("Object info is not available\n");
+		return;
+	}
+
+	elm_object_focus_custom_chain_unset(obj);
+
+	DbgPrint("Rebuild focus chain begin\n");
+	EINA_LIST_FOREACH(obj_info->access_chain, l, ao) {
+		DbgPrint("Append %p\n", ao);
+		elm_object_focus_custom_chain_append(obj, ao, NULL);
+	}
+	DbgPrint("Rebuild focus chain done\n");
+}
+
 PUBLIC const char *script_magic_id(void)
 {
 	return "edje";
@@ -151,14 +175,59 @@ PUBLIC int script_update_color(void *h, Evas *e, const char *id, const char *par
 
 PUBLIC int script_update_text(void *h, Evas *e, const char *id, const char *part, const char *text)
 {
+	struct obj_info *obj_info;
 	struct info *handle = h;
 	Evas_Object *edje;
+	Evas_Object *to;
 
 	edje = find_edje(handle, id);
-	if (!edje)
+	if (!edje) {
+		ErrPrint("Failed to find EDJE\n");
 		return LB_STATUS_ERROR_NOT_EXIST;
+	}
+
+	obj_info = evas_object_data_get(edje, "obj_info");
+	if (!obj_info) {
+		ErrPrint("Object info is not available\n");
+		return LB_STATUS_ERROR_FAULT;
+	}
 
 	elm_object_part_text_set(edje, part, text);
+
+	to = (Evas_Object *)edje_object_part_object_get(elm_layout_edje_get(edje), part);
+	if (to) {
+		Evas_Object *ao;
+
+		ao = evas_object_data_get(to, "ao");
+		if (ao) {
+			/* Update Access Info */
+			elm_access_info_set(ao, ELM_ACCESS_INFO, text);
+			DbgPrint("[%s] Update access info: (%s)\n", part, text);
+		} else {
+			ao = elm_access_object_register(to, edje);
+			if (!ao) {
+				ErrPrint("Failed to add access object\n");
+			} else {
+				char *utf8;
+				utf8 = elm_entry_markup_to_utf8(text);
+				if (utf8) {
+					DbgPrint("[%s] Text is converted to [%s]\n", part, utf8);
+					elm_access_info_set(ao, ELM_ACCESS_INFO, utf8);
+					free(utf8);
+				} else {
+					DbgPrint("[%s] Unable to convert text to utf8: [%s]\n", part, text);
+					elm_access_info_set(ao, ELM_ACCESS_INFO, text);
+				}
+
+				obj_info->access_chain = eina_list_append(obj_info->access_chain, ao);
+				evas_object_data_set(to, "ao", ao);
+				elm_object_focus_custom_chain_append(edje, ao, NULL);
+			}
+		}
+	} else {
+		ErrPrint("Unable to get text part[%s]\n", part);
+	}
+
 	return LB_STATUS_SUCCESS;
 }
 
@@ -358,6 +427,52 @@ static inline void parse_image_option(const char *option, struct image_option *i
 	}
 }
 
+PUBLIC int script_update_access(void *_h, Evas *e, const char *id, const char *part, const char *text, const char *option)
+{
+	struct info *handle = _h;
+	Evas_Object *edje;
+	struct obj_info *obj_info;
+	Evas_Object *to;
+
+	edje = find_edje(handle, id);
+	if (!edje) {
+		ErrPrint("No such object: %s\n", id);
+		return LB_STATUS_ERROR_NOT_EXIST;
+	}
+
+	obj_info = evas_object_data_get(edje, "obj_info");
+	if (!obj_info) {
+		ErrPrint("Object info is not available\n");
+		return LB_STATUS_ERROR_FAULT;
+	}
+
+	to = (Evas_Object *)edje_object_part_object_get(elm_layout_edje_get(edje), part);
+	if (to) {
+		Evas_Object *ao;
+
+		ao = evas_object_data_get(to, "ao");
+		if (ao) {
+			DbgPrint("[%s] Update access object (%s)\n", part, text);
+			elm_access_info_set(ao, ELM_ACCESS_INFO, text);
+		} else {
+			ao = elm_access_object_register(to, edje);
+			if (!ao) {
+				ErrPrint("Unable to register access object\n");
+			} else {
+				elm_access_info_set(ao, ELM_ACCESS_INFO, text);
+				obj_info->access_chain = eina_list_append(obj_info->access_chain, ao);
+				evas_object_data_set(to, "ao", ao);
+				elm_object_focus_custom_chain_append(edje, ao, NULL);
+				DbgPrint("[%s] Register access info: (%s)\n", part, text);
+			}
+		}
+	} else {
+		ErrPrint("[%s] is not exists\n", part);
+	}
+
+	return LB_STATUS_SUCCESS;
+}
+
 PUBLIC int script_update_image(void *_h, Evas *e, const char *id, const char *part, const char *path, const char *option)
 {
 	struct info *handle = _h;
@@ -391,6 +506,7 @@ PUBLIC int script_update_image(void *_h, Evas *e, const char *id, const char *pa
 	if (img) {
 		Eina_List *l;
 		Eina_List *n;
+		Evas_Object *ao;
 
 		EINA_LIST_FOREACH_SAFE(obj_info->children, l, n, child) {
 			if (child->obj != img)
@@ -403,7 +519,15 @@ PUBLIC int script_update_image(void *_h, Evas *e, const char *id, const char *pa
 		}
 
 		DbgPrint("delete object %s %p\n", part, img);
+		ao = evas_object_data_del(img, "ao");
+		if (ao) {
+			elm_access_object_unregister(ao);
+			obj_info->access_chain = eina_list_remove(obj_info->access_chain, ao);
+			DbgPrint("Successfully unregistered\n");
+		}
 		evas_object_del(img);
+
+		rebuild_focus_chain(edje);
 	}
 
 	if (!path || !strlen(path) || access(path, R_OK) != 0) {
@@ -509,6 +633,11 @@ PUBLIC int script_update_image(void *_h, Evas *e, const char *id, const char *pa
 	elm_object_part_content_set(edje, part, img);
 	obj_info->children = eina_list_append(obj_info->children, child);
 
+	/*!
+	 * \note
+	 * This object is not registered as an access object.
+	 * So the developer should add it to access list manually, using DESC_ACCESS block.
+	 */
 	return LB_STATUS_SUCCESS;
 }
 
@@ -550,6 +679,7 @@ static void edje_del_cb(void *_info, Evas *e, Evas_Object *obj, void *event_info
 	struct info *handle = _info;
 	struct obj_info *obj_info;
 	struct child *child;
+	Evas_Object *ao;
 
 	handle->obj_list = eina_list_remove(handle->obj_list, obj);
 
@@ -563,16 +693,178 @@ static void edje_del_cb(void *_info, Evas *e, Evas_Object *obj, void *event_info
 
 	elm_object_signal_callback_del(obj, "*", "*", script_signal_cb);
 
+	elm_object_focus_custom_chain_unset(obj);
+
 	EINA_LIST_FREE(obj_info->children, child) {
 		DbgPrint("delete object %s %p\n", child->part, child->obj);
-		if (child->obj)
+		if (child->obj) {
+			Evas_Object *ao;
+			ao = evas_object_data_del(child->obj, "ao");
+			if (ao) {
+				obj_info->access_chain = eina_list_remove(obj_info->access_chain, ao);
+				elm_access_object_unregister(ao);
+			}
 			evas_object_del(child->obj);
+		}
 		free(child->part);
 		free(child);
 	}
 
+	EINA_LIST_FREE(obj_info->access_chain, ao) {
+		elm_access_object_unregister(ao);
+	}
+
 	free(obj_info->id);
 	free(obj_info);
+}
+
+/*!
+	LB_ACCESS_HIGHLIGHT		0
+	LB_ACCESS_HIGHLIGHT_NEXT	1
+	LB_ACCESS_HIGHLIGHT_PREV	2
+	LB_ACCESS_ACTIVATE		3
+	LB_ACCESS_VALUE_CHANGE		4
+	LB_ACCESS_SCROLL		5
+*/
+PUBLIC int script_feed_event(void *h, Evas *e, int event_type, int x, int y, double timestamp)
+{
+	struct info *handle = h;
+	Evas_Object *edje;
+	struct obj_info *obj_info;
+	int ret = LB_STATUS_SUCCESS;
+
+	DbgPrint("event: %d, x: %d, y: %d\n", event_type, x, y);
+
+	edje = find_edje(handle, NULL); /*!< Get the base layout */
+	if (!edje) {
+		ErrPrint("Base layout is not exist\n");
+		return LB_STATUS_ERROR_NOT_EXIST;
+	}
+
+	obj_info = evas_object_data_get(edje, "obj_info");
+	if (!obj_info) {
+		ErrPrint("Object info is not valid\n");
+		return LB_STATUS_ERROR_INVALID;
+	}
+
+	if (event_type & LB_SCRIPT_ACCESS_EVENT) {
+		Elm_Access_Action_Info *info;
+		Elm_Access_Action_Type action;
+
+		info = malloc(sizeof(*info));
+		if (!info) {
+			ErrPrint("Error: %s\n", strerror(errno));
+			return LB_STATUS_ERROR_MEMORY;
+		}
+
+		{
+			const Eina_List *chain;
+			chain = elm_object_focus_custom_chain_get(edje);
+			DbgPrint("Focus chain : %d\n", eina_list_count(chain));
+		}
+
+		switch (event_type) {
+		case LB_SCRIPT_ACCESS_HIGHLIGHT: /*!< LB_ACCESS_HIGHLIGHT */
+			action = ELM_ACCESS_ACTION_HIGHLIGHT;
+			info->x = x;
+			info->y = y;
+			ret = elm_access_action(edje, action, info);
+			DbgPrint("ACCESS_HIGHLIGHT: %dx%d returns %d\n", x, y, ret);
+			if (ret == EINA_FALSE)
+				ret = LB_ACCESS_STATUS_ERROR;
+			else
+				ret = LB_ACCESS_STATUS_DONE;
+			break;
+		case LB_SCRIPT_ACCESS_HIGHLIGHT_NEXT: /*!< LB_ACCESS_HIGHLIGHT_NEXT */
+			action = ELM_ACCESS_ACTION_HIGHLIGHT_NEXT;
+			info->highlight_cycle = EINA_FALSE;
+			ret = elm_access_action(edje, action, info);
+			DbgPrint("ACCESS_HIGHLIGHT_NEXT, returns %d\n", ret);
+			if (ret == EINA_FALSE)
+				ret = LB_ACCESS_STATUS_LAST;
+			else
+				ret = LB_ACCESS_STATUS_DONE;
+			break;
+		case LB_SCRIPT_ACCESS_HIGHLIGHT_PREV: /*!< LB_ACCESS_HIGHLIGHT_PREV */
+			action = ELM_ACCESS_ACTION_HIGHLIGHT_PREV;
+			info->highlight_cycle = EINA_FALSE;
+			ret = elm_access_action(edje, action, info);
+			DbgPrint("ACCESS_HIGHLIGHT_PREV, returns %d\n", ret);
+			if (ret == EINA_FALSE)
+				ret = LB_ACCESS_STATUS_FIRST;
+			else
+				ret = LB_ACCESS_STATUS_DONE;
+			break;
+		case LB_SCRIPT_ACCESS_ACTIVATE: /*!< LB_ACCESS_ACTIVATE */
+			action = ELM_ACCESS_ACTION_ACTIVATE;
+			ret = elm_access_action(edje, action, info);
+			DbgPrint("ACCESS_HIGHLIGHT_ACTIVATE, returns %d\n", ret);
+			if (ret == EINA_FALSE)
+				ret = LB_ACCESS_STATUS_ERROR;
+			else
+				ret = LB_ACCESS_STATUS_DONE;
+			break;
+		case LB_SCRIPT_ACCESS_VALUE_CHANGE: /*!< LB_ACCESS_VALUE_CHANGE */
+			action = ELM_ACCESS_ACTION_VALUE_CHANGE;
+			ret = elm_access_action(edje, action, info);
+			DbgPrint("ACCESS_HIGHLIGHT_VALUE_CHANGE, returns %d\n", ret);
+			if (ret == EINA_FALSE)
+				ret = LB_ACCESS_STATUS_ERROR;
+			else
+				ret = LB_ACCESS_STATUS_DONE;
+			break;
+		case LB_SCRIPT_ACCESS_SCROLL: /*!< LB_ACCESS_SCROLL */
+			action = ELM_ACCESS_ACTION_SCROLL;
+			ret = elm_access_action(edje, action, info);
+			DbgPrint("ACCESS_HIGHLIGHT_SCROLL, returns %d\n", ret);
+			if (ret == EINA_FALSE)
+				ret = LB_ACCESS_STATUS_ERROR;
+			else
+				ret = LB_ACCESS_STATUS_DONE;
+			break;
+		case LB_SCRIPT_ACCESS_UNHIGHLIGHT:
+			action = ELM_ACCESS_ACTION_UNHIGHLIGHT;
+			ret = elm_access_action(edje, action, info);
+			DbgPrint("ACCESS_UNHIGHLIGHT, returns %d\n", ret);
+			if (ret == EINA_FALSE)
+				ret = LB_ACCESS_STATUS_ERROR;
+			else
+				ret = LB_ACCESS_STATUS_DONE;
+			break;
+		default:
+			DbgPrint("Invalid event\n");
+			ret = LB_ACCESS_STATUS_ERROR;
+		}
+
+		free(info);
+	} else if (event_type & LB_SCRIPT_MOUSE_EVENT) {
+		switch (event_type) {
+		case LB_SCRIPT_MOUSE_DOWN:
+			evas_event_feed_mouse_move(e, x, y, timestamp, NULL);
+			evas_event_feed_mouse_down(e, 1, EVAS_BUTTON_NONE, timestamp + 0.01f, NULL);
+			break;
+		case LB_SCRIPT_MOUSE_MOVE:
+			evas_event_feed_mouse_move(e, x, y, timestamp, NULL);
+			break;
+		case LB_SCRIPT_MOUSE_UP:
+			evas_event_feed_mouse_move(e, x, y, timestamp, NULL);
+			evas_event_feed_mouse_up(e, 1, EVAS_BUTTON_NONE, timestamp + 0.1f, NULL);
+			break;
+		case LB_SCRIPT_MOUSE_IN:
+			evas_event_feed_mouse_in(e, timestamp, NULL);
+			break;
+		case LB_SCRIPT_MOUSE_OUT:
+			evas_event_feed_mouse_out(e, timestamp, NULL);
+			break;
+		default:
+			return LB_STATUS_ERROR_INVALID;
+		}
+	} else if (event_type & LB_SCRIPT_KEY_EVENT) {
+		DbgPrint("Key event is not implemented\n");
+		return LB_STATUS_ERROR_NOT_IMPLEMENTED;
+	}
+
+	return ret;
 }
 
 PUBLIC int script_update_script(void *h, Evas *e, const char *src_id, const char *target_id, const char *part, const char *path, const char *group)
@@ -607,12 +899,18 @@ PUBLIC int script_update_script(void *h, Evas *e, const char *src_id, const char
 				continue;
 
 			obj_info->children = eina_list_remove(obj_info->children, child);
+
 			free(child->part);
 			free(child);
 			break;
 		}
 
 		DbgPrint("delete object %s %p\n", part, obj);
+		/*!
+		 * \note
+		 * This will call the edje_del_cb.
+		 * It will delete all access objects
+		 */
 		evas_object_del(obj);
 	}
 
@@ -881,8 +1179,25 @@ PUBLIC int script_unload(void *_handle, Evas *e)
 	return LB_STATUS_SUCCESS;
 }
 
+static void access_cb(keynode_t *node, void *user_data)
+{
+	int state;
+
+	if (!node) {
+		if (vconf_get_bool(VCONFKEY_SETAPPL_ACCESSIBILITY_TTS, &state) != 0) {
+			ErrPrint("Idle lock state is not valid\n");
+			state = 0; /* DISABLED */
+		}
+	} else {
+		state = vconf_keynode_get_bool(node);
+	}
+
+	elm_config_access_set(state);
+}
+
 PUBLIC int script_init(void)
 {
+	int ret;
 	char *argv[] = {
 		"livebox.edje",
 		NULL,
@@ -891,11 +1206,17 @@ PUBLIC int script_init(void)
 	elm_init(1, argv);
 	elm_config_scale_set(scale_get());
 
+	ret = vconf_notify_key_changed(VCONFKEY_SETAPPL_ACCESSIBILITY_TTS, access_cb, NULL);
+	if (ret < 0)
+		ErrPrint("Failed to access cb\n");
+
+	access_cb(NULL, NULL);
 	return LB_STATUS_SUCCESS;
 }
 
 PUBLIC int script_fini(void)
 {
+	vconf_ignore_key_changed(VCONFKEY_SETAPPL_ACCESSIBILITY_TTS, access_cb);
 	elm_shutdown();
 	return LB_STATUS_SUCCESS;
 }
