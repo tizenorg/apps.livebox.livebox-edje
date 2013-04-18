@@ -49,7 +49,7 @@ extern int script_unload(void *handle, Evas *e);
 	LB_ACCESS_VALUE_CHANGE		4
 	LB_ACCESS_SCROLL		5
 */
-extern int script_feed_event(void *h, Evas *e, int event_type, int x, int y, double timestamp);
+extern int script_feed_event(void *h, Evas *e, int event_type, int x, int y, int down, double timestamp);
 
 extern int script_init(void);
 extern int script_fini(void);

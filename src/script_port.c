@@ -29,6 +29,8 @@
 #include <Eet.h>
 #include <Ecore_X.h>
 
+#include <system_settings.h>
+
 #include <dlog.h>
 #include <debug.h>
 #include <vconf.h>
@@ -77,6 +79,14 @@ struct obj_info {
 	Eina_List *children;
 	Evas_Object *win;
 	Eina_List *access_chain;
+};
+
+static struct {
+	char *font_name;
+	int font_size;
+} s_info = {
+	.font_name = NULL,
+	.font_size = 1,
 };
 
 static inline double scale_get(void)
@@ -313,7 +323,7 @@ static void parse_orient(struct image_option *img_opt, const char *value, int le
 		return;
 
 	img_opt->orient = !strncasecmp(value, "true", 4);
-	DbgPrint("Parsed ORIENT: %d (%s)\n", img_opt->aspect, value);
+	DbgPrint("Parsed ORIENT: %d (%s)\n", img_opt->orient, value);
 }
 
 static void parse_size(struct image_option *img_opt, const char *value, int len)
@@ -677,6 +687,39 @@ PUBLIC int script_update_image(void *_h, Evas *e, const char *id, const char *pa
 			evas_object_image_load_region_set(img, (w - part_w) / 2, (h - part_h) / 2, part_w, part_h);
 			evas_object_image_fill_set(img, 0, 0, part_w, part_h);
 			evas_object_image_reload(img);
+		} else if (img_opt.fill == FILL_IN_SIZE) {
+			Evas_Coord part_w;
+			Evas_Coord part_h;
+
+			if (img_opt.width >= 0 && img_opt.height >= 0) {
+				part_w = img_opt.width * scale_get();
+				part_h = img_opt.height * scale_get();
+			} else {
+				part_w = 0;
+				part_h = 0;
+				edje_object_part_geometry_get(elm_layout_edje_get(edje), part, NULL, NULL, &part_w, &part_h);
+			}
+			DbgPrint("Original %dx%d (part: %dx%d)\n", w, h, part_w, part_h);
+
+			if (part_w > w || part_h > h) {
+				double fw;
+				double fh;
+
+				fw = (double)part_w / (double)w;
+				fh = (double)part_h / (double)h;
+
+				if (fw > fh) {
+					w = part_w;
+					h = (double)h * fw;
+				} else {
+					h = part_h;
+					w = (double)w * fh;
+				}
+			}
+			DbgPrint("Size: %dx%d\n", w, h);
+			evas_object_image_fill_set(img, 0, 0, part_w, part_h);
+			evas_object_size_hint_fill_set(img, EVAS_HINT_FILL, EVAS_HINT_FILL);
+			evas_object_size_hint_weight_set(img, EVAS_HINT_EXPAND, EVAS_HINT_EXPAND);
 		} else {
 			evas_object_image_fill_set(img, 0, 0, w, h);
 			evas_object_size_hint_fill_set(img, EVAS_HINT_FILL, EVAS_HINT_FILL);
@@ -798,7 +841,7 @@ static void edje_del_cb(void *_info, Evas *e, Evas_Object *obj, void *event_info
 	LB_ACCESS_VALUE_CHANGE		4
 	LB_ACCESS_SCROLL		5
 */
-PUBLIC int script_feed_event(void *h, Evas *e, int event_type, int x, int y, double timestamp)
+PUBLIC int script_feed_event(void *h, Evas *e, int event_type, int x, int y, int down, double timestamp)
 {
 	struct info *handle = h;
 	Evas_Object *edje;
@@ -864,6 +907,15 @@ PUBLIC int script_feed_event(void *h, Evas *e, int event_type, int x, int y, dou
 			ret = (ret == EINA_FALSE) ? LB_ACCESS_STATUS_ERROR : LB_ACCESS_STATUS_DONE;
 		} else if ((event_type & LB_SCRIPT_ACCESS_SCROLL) == LB_SCRIPT_ACCESS_SCROLL) {
 			action = ELM_ACCESS_ACTION_SCROLL;
+			info->x = x;
+			info->y = y;
+			switch (down) {
+			case 0: info->mouse_type = 0; break;
+			case -1: info->mouse_type = 1; break;
+			case 1: info->mouse_type = 2; break;
+			default:
+				break;
+			}
 			ret = elm_access_action(edje, action, info);
 			DbgPrint("ACCESS_HIGHLIGHT_SCROLL, returns %d\n", ret);
 			ret = (ret == EINA_FALSE) ? LB_ACCESS_STATUS_ERROR : LB_ACCESS_STATUS_DONE;
@@ -1237,6 +1289,60 @@ static void access_cb(keynode_t *node, void *user_data)
 	elm_config_access_set(state);
 }
 
+static void update_font_cb(void *data)
+{
+	elm_config_font_overlay_set(TEXT_CLASS, s_info.font_name, s_info.font_size);
+	DbgPrint("Update text class %s (%s, %d)\n", TEXT_CLASS, s_info.font_name, s_info.font_size);
+}
+
+static void font_changed_cb(system_settings_key_e key, void *user_data)
+{
+	int ret;
+	char *font_name;
+
+	ret = system_settings_get_value_string(SYSTEM_SETTINGS_KEY_FONT_TYPE, &font_name);
+	if (ret != SYSTEM_SETTINGS_ERROR_NONE || !font_name)
+		return;
+
+	if (s_info.font_name && !strcmp(s_info.font_name, font_name)) {
+		DbgPrint("Font is not changed\n");
+		free(font_name);
+		return;
+	}
+
+	if (s_info.font_name) {
+		free(s_info.font_name);
+		s_info.font_name = NULL;
+	}
+
+	s_info.font_name = font_name;
+	DbgPrint("Font name is changed to %s\n", s_info.font_name);
+
+	/*!
+	 * \NOTE
+	 * Try to update all liveboxes
+	 */
+	update_font_cb(NULL);
+}
+
+static void font_size_cb(system_settings_key_e key, void *user_data)
+{
+	int size;
+
+	if (system_settings_get_value_int(SYSTEM_SETTINGS_KEY_FONT_SIZE, &size) != SYSTEM_SETTINGS_ERROR_NONE)
+		return;
+
+	if (size == s_info.font_size) {
+		DbgPrint("Font size is not changed\n");
+		return;
+	}
+
+	s_info.font_size = size;
+	DbgPrint("Font size is changed to %d\n", size);
+
+	update_font_cb(NULL);
+}
+
 PUBLIC int script_init(void)
 {
 	int ret;
@@ -1253,12 +1359,30 @@ PUBLIC int script_init(void)
 		ErrPrint("Failed to access cb\n");
 
 	access_cb(NULL, NULL);
+
+	ret = system_settings_set_changed_cb(SYSTEM_SETTINGS_KEY_FONT_TYPE, font_changed_cb, NULL);
+	DbgPrint("System font is changed: %d\n", ret);
+	
+	ret = system_settings_set_changed_cb(SYSTEM_SETTINGS_KEY_FONT_SIZE, font_size_cb, NULL);
+	DbgPrint("System font size is changed: %d\n", ret);
+
+	ret = system_settings_get_value_string(SYSTEM_SETTINGS_KEY_FONT_TYPE, &s_info.font_name);
+	if (ret == SYSTEM_SETTINGS_ERROR_NONE)
+		DbgPrint("Current font: %s\n", s_info.font_name);
+
+	ret = system_settings_get_value_int(SYSTEM_SETTINGS_KEY_FONT_SIZE, &s_info.font_size);
+	if (ret == SYSTEM_SETTINGS_ERROR_NONE)
+		DbgPrint("Current size: %d\n", s_info.font_size);
+
 	return LB_STATUS_SUCCESS;
 }
 
 PUBLIC int script_fini(void)
 {
-	vconf_ignore_key_changed(VCONFKEY_SETAPPL_ACCESSIBILITY_TTS, access_cb);
+	int ret;
+	ret = system_settings_unset_changed_cb(SYSTEM_SETTINGS_KEY_FONT_SIZE);
+	ret = system_settings_unset_changed_cb(SYSTEM_SETTINGS_KEY_FONT_TYPE);
+	ret = vconf_ignore_key_changed(VCONFKEY_SETAPPL_ACCESSIBILITY_TTS, access_cb);
 	elm_shutdown();
 	return LB_STATUS_SUCCESS;
 }

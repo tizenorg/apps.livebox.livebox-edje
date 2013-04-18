@@ -13,6 +13,7 @@ pkg_check_modules(live_edje REQUIRED
 	vconf
 	livebox-service
 	elementary
+	capi-system-system-settings
 )
 
 FOREACH (flag ${live_edje_CFLAGS})
