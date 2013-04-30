@@ -1,7 +1,7 @@
 /*
  * Copyright 2013  Samsung Electronics Co., Ltd
  *
- * Licensed under the Flora License, Version 1.0 (the "License");
+ * Licensed under the Flora License, Version 1.1 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
@@ -40,6 +40,7 @@
 #include "script_port.h"
 
 #define TEXT_CLASS	"tizen"
+#define DEFAULT_FONT_SIZE	-100
 #define BASE_WIDTH	720.0f
 
 #define PUBLIC __attribute__((visibility("default")))
@@ -86,7 +87,7 @@ static struct {
 	int font_size;
 } s_info = {
 	.font_name = NULL,
-	.font_size = 1,
+	.font_size = -100,
 };
 
 static inline double scale_get(void)
@@ -838,7 +839,7 @@ static void edje_del_cb(void *_info, Evas *e, Evas_Object *obj, void *event_info
 	LB_ACCESS_HIGHLIGHT_NEXT	1
 	LB_ACCESS_HIGHLIGHT_PREV	2
 	LB_ACCESS_ACTIVATE		3
-	LB_ACCESS_VALUE_CHANGE		4
+	LB_ACCESS_ACTION		4
 	LB_ACCESS_SCROLL		5
 */
 PUBLIC int script_feed_event(void *h, Evas *e, int event_type, int x, int y, int down, double timestamp)
@@ -898,27 +899,50 @@ PUBLIC int script_feed_event(void *h, Evas *e, int event_type, int x, int y, int
 		} else if ((event_type & LB_SCRIPT_ACCESS_ACTIVATE) == LB_SCRIPT_ACCESS_ACTIVATE) {
 			action = ELM_ACCESS_ACTION_ACTIVATE;
 			ret = elm_access_action(edje, action, info);
-			DbgPrint("ACCESS_HIGHLIGHT_ACTIVATE, returns %d\n", ret);
+			DbgPrint("ACCESS_ACTIVATE, returns %d\n", ret);
 			ret = (ret == EINA_FALSE) ? LB_ACCESS_STATUS_ERROR : LB_ACCESS_STATUS_DONE;
-		} else if ((event_type & LB_SCRIPT_ACCESS_VALUE_CHANGE) == LB_SCRIPT_ACCESS_VALUE_CHANGE) {
-			action = ELM_ACCESS_ACTION_VALUE_CHANGE;
-			ret = elm_access_action(edje, action, info);
-			DbgPrint("ACCESS_HIGHLIGHT_VALUE_CHANGE, returns %d\n", ret);
-			ret = (ret == EINA_FALSE) ? LB_ACCESS_STATUS_ERROR : LB_ACCESS_STATUS_DONE;
+		} else if ((event_type & LB_SCRIPT_ACCESS_ACTION) == LB_SCRIPT_ACCESS_ACTION) {
+			if (down == 0) {
+				action = ELM_ACCESS_ACTION_UP;
+				ret = elm_access_action(edje, action, info);
+				DbgPrint("ACCESS_ACTION(%d), returns %d\n", down, ret);
+				ret = (ret == EINA_FALSE) ? LB_ACCESS_STATUS_ERROR : LB_ACCESS_STATUS_DONE;
+			} else if (down == 1) {
+				action = ELM_ACCESS_ACTION_DOWN;
+				ret = elm_access_action(edje, action, info);
+				DbgPrint("ACCESS_ACTION(%d), returns %d\n", down, ret);
+				ret = (ret == EINA_FALSE) ? LB_ACCESS_STATUS_ERROR : LB_ACCESS_STATUS_DONE;
+			} else {
+				ErrPrint("Invalid access event\n");
+				ret = LB_ACCESS_STATUS_ERROR;
+			}
 		} else if ((event_type & LB_SCRIPT_ACCESS_SCROLL) == LB_SCRIPT_ACCESS_SCROLL) {
 			action = ELM_ACCESS_ACTION_SCROLL;
 			info->x = x;
 			info->y = y;
 			switch (down) {
-			case 0: info->mouse_type = 0; break;
-			case -1: info->mouse_type = 1; break;
-			case 1: info->mouse_type = 2; break;
+			case 0:
+				info->mouse_type = 0;
+				ret = elm_access_action(edje, action, info);
+				DbgPrint("ACCESS_HIGHLIGHT_SCROLL, returns %d\n", ret);
+				ret = (ret == EINA_FALSE) ? LB_ACCESS_STATUS_ERROR : LB_ACCESS_STATUS_DONE;
+				break;
+			case -1:
+				info->mouse_type = 1;
+				ret = elm_access_action(edje, action, info);
+				DbgPrint("ACCESS_HIGHLIGHT_SCROLL, returns %d\n", ret);
+				ret = (ret == EINA_FALSE) ? LB_ACCESS_STATUS_ERROR : LB_ACCESS_STATUS_DONE;
+				break;
+			case 1:
+				info->mouse_type = 2;
+				ret = elm_access_action(edje, action, info);
+				DbgPrint("ACCESS_HIGHLIGHT_SCROLL, returns %d\n", ret);
+				ret = (ret == EINA_FALSE) ? LB_ACCESS_STATUS_ERROR : LB_ACCESS_STATUS_DONE;
+				break;
 			default:
+				ret = LB_ACCESS_STATUS_ERROR;
 				break;
 			}
-			ret = elm_access_action(edje, action, info);
-			DbgPrint("ACCESS_HIGHLIGHT_SCROLL, returns %d\n", ret);
-			ret = (ret == EINA_FALSE) ? LB_ACCESS_STATUS_ERROR : LB_ACCESS_STATUS_DONE;
 		} else if ((event_type & LB_SCRIPT_ACCESS_UNHIGHLIGHT) == LB_SCRIPT_ACCESS_UNHIGHLIGHT) {
 			action = ELM_ACCESS_ACTION_UNHIGHLIGHT;
 			ret = elm_access_action(edje, action, info);
@@ -1291,32 +1315,34 @@ static void access_cb(keynode_t *node, void *user_data)
 
 static void update_font_cb(void *data)
 {
-	elm_config_font_overlay_set(TEXT_CLASS, s_info.font_name, s_info.font_size);
-	DbgPrint("Update text class %s (%s, %d)\n", TEXT_CLASS, s_info.font_name, s_info.font_size);
+	elm_config_font_overlay_set(TEXT_CLASS, s_info.font_name, DEFAULT_FONT_SIZE);
+	DbgPrint("Update text class %s (%s, %d)\n", TEXT_CLASS, s_info.font_name, DEFAULT_FONT_SIZE);
 }
 
-static void font_changed_cb(system_settings_key_e key, void *user_data)
+static void font_changed_cb(keynode_t *node, void *user_data)
 {
-	int ret;
 	char *font_name;
 
-	ret = system_settings_get_value_string(SYSTEM_SETTINGS_KEY_FONT_TYPE, &font_name);
-	if (ret != SYSTEM_SETTINGS_ERROR_NONE || !font_name)
+	font_name = vconf_get_str("db/setting/accessibility/font_name");
+	if (!font_name) {
+		ErrPrint("Invalid font name (NULL)\n");
 		return;
+	}
 
 	if (s_info.font_name && !strcmp(s_info.font_name, font_name)) {
-		DbgPrint("Font is not changed\n");
+		DbgPrint("Font is not changed (Old: %s(%p) <> New: %s(%p))\n", s_info.font_name, s_info.font_name, font_name, font_name);
 		free(font_name);
 		return;
 	}
 
 	if (s_info.font_name) {
+		DbgPrint("Release old font name: %s(%p)\n", s_info.font_name, s_info.font_name);
 		free(s_info.font_name);
 		s_info.font_name = NULL;
 	}
 
 	s_info.font_name = font_name;
-	DbgPrint("Font name is changed to %s\n", s_info.font_name);
+	DbgPrint("Font name is changed to %s(%p)\n", s_info.font_name, s_info.font_name);
 
 	/*!
 	 * \NOTE
@@ -1325,12 +1351,41 @@ static void font_changed_cb(system_settings_key_e key, void *user_data)
 	update_font_cb(NULL);
 }
 
+static inline int convert_font_size(int size)
+{
+	switch (size) {
+	case SYSTEM_SETTINGS_FONT_SIZE_SMALL:
+		size = -80;
+		break;
+	case SYSTEM_SETTINGS_FONT_SIZE_NORMAL:
+		size = -100;
+		break;
+	case SYSTEM_SETTINGS_FONT_SIZE_LARGE:
+		size = -150;
+		break;
+	case SYSTEM_SETTINGS_FONT_SIZE_HUGE:
+		size = -190;
+		break;
+	case SYSTEM_SETTINGS_FONT_SIZE_GIANT:
+		size = -250;
+		break;
+	default:
+		size = -100;
+		break;
+	}
+
+	DbgPrint("Return size: %d\n", size);
+	return size;
+}
+
 static void font_size_cb(system_settings_key_e key, void *user_data)
 {
 	int size;
 
 	if (system_settings_get_value_int(SYSTEM_SETTINGS_KEY_FONT_SIZE, &size) != SYSTEM_SETTINGS_ERROR_NONE)
 		return;
+
+	size = convert_font_size(size);
 
 	if (size == s_info.font_size) {
 		DbgPrint("Font size is not changed\n");
@@ -1346,6 +1401,7 @@ static void font_size_cb(system_settings_key_e key, void *user_data)
 PUBLIC int script_init(void)
 {
 	int ret;
+	int size = DEFAULT_FONT_SIZE;
 	char *argv[] = {
 		"livebox.edje",
 		NULL,
@@ -1360,19 +1416,18 @@ PUBLIC int script_init(void)
 
 	access_cb(NULL, NULL);
 
-	ret = system_settings_set_changed_cb(SYSTEM_SETTINGS_KEY_FONT_TYPE, font_changed_cb, NULL);
+	ret = vconf_notify_key_changed("db/setting/accessibility/font_name", font_changed_cb, NULL);
 	DbgPrint("System font is changed: %d\n", ret);
 	
 	ret = system_settings_set_changed_cb(SYSTEM_SETTINGS_KEY_FONT_SIZE, font_size_cb, NULL);
 	DbgPrint("System font size is changed: %d\n", ret);
 
-	ret = system_settings_get_value_string(SYSTEM_SETTINGS_KEY_FONT_TYPE, &s_info.font_name);
-	if (ret == SYSTEM_SETTINGS_ERROR_NONE)
-		DbgPrint("Current font: %s\n", s_info.font_name);
+	s_info.font_name = vconf_get_str("db/setting/accessibility/font_name");
+	DbgPrint("Current font: %s\n", s_info.font_name);
 
-	ret = system_settings_get_value_int(SYSTEM_SETTINGS_KEY_FONT_SIZE, &s_info.font_size);
-	if (ret == SYSTEM_SETTINGS_ERROR_NONE)
-		DbgPrint("Current size: %d\n", s_info.font_size);
+	ret = system_settings_get_value_int(SYSTEM_SETTINGS_KEY_FONT_SIZE, &size);
+	s_info.font_size = convert_font_size(size);
+	DbgPrint("Current size: %d\n", s_info.font_size);
 
 	return LB_STATUS_SUCCESS;
 }
