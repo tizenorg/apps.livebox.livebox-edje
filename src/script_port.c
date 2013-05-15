@@ -78,7 +78,7 @@ struct child {
 struct obj_info {
 	char *id;
 	Eina_List *children;
-	Evas_Object *win;
+	Evas_Object *parent;
 	Eina_List *access_chain;
 };
 
@@ -792,6 +792,7 @@ static void edje_del_cb(void *_info, Evas *e, Evas_Object *obj, void *event_info
 {
 	struct info *handle = _info;
 	struct obj_info *obj_info;
+	struct obj_info *parent_obj_info;
 	struct child *child;
 	Evas_Object *ao;
 
@@ -804,6 +805,30 @@ static void edje_del_cb(void *_info, Evas *e, Evas_Object *obj, void *event_info
 	}
 
 	DbgPrint("delete object %s %p\n", obj_info->id, obj);
+	parent_obj_info = evas_object_data_get(obj_info->parent, "obj_info");
+	if (parent_obj_info) {
+		Eina_List *l;
+		Eina_List *n;
+
+		EINA_LIST_FOREACH_SAFE(parent_obj_info->children, l, n, child) {
+			if (child->obj != obj)
+				continue;
+
+			/*!
+			 * \note
+			 * If this code is executed,
+			 * The parent is not deleted by desc, this object is deleted by itself.
+			 * It is not possible, but we care it.
+			 */
+			DbgPrint("Parent's children is updated: %s\n", child->part);
+			parent_obj_info->children = eina_list_remove(parent_obj_info->children, child);
+			free(child->part);
+			free(child);
+			break;
+		}
+	} else {
+		DbgPrint("Parent EDJE\n");
+	}
 
 	elm_object_signal_callback_del(obj, "*", "*", script_signal_cb);
 
@@ -991,6 +1016,7 @@ PUBLIC int script_update_script(void *h, Evas *e, const char *src_id, const char
 	Evas_Object *obj;
 	struct obj_info *obj_info;
 	struct child *child;
+	char _target_id[32];
 
 	DbgPrint("src_id[%s] target_id[%s] part[%s] path[%s] group[%s]\n", src_id, target_id, part, path, group);
 
@@ -1036,6 +1062,30 @@ PUBLIC int script_update_script(void *h, Evas *e, const char *src_id, const char
 		return LB_STATUS_SUCCESS;
 	}
 
+	if (!target_id) {
+		if (find_edje(handle, part)) {
+			double timestamp;
+			struct timeval tv;
+
+			do {
+				if (gettimeofday(&tv, NULL) < 0) {
+					static int local_idx = 0;
+					timestamp = (double)(local_idx++);
+				} else {
+					timestamp = (double)tv.tv_sec + ((double)tv.tv_usec / 1000000.0f);
+				}
+
+				snprintf(_target_id, sizeof(_target_id), "%lf", timestamp);
+			} while (find_edje(handle, _target_id));
+
+			target_id = _target_id;
+		} else {
+			target_id = part;
+		}
+
+		DbgPrint("Anonymouse target id: %s\n", target_id);
+	}
+
 	obj = elm_layout_add(edje);
 	if (!obj) {
 		ErrPrint("Failed to add a new edje object\n");
@@ -1070,6 +1120,8 @@ PUBLIC int script_update_script(void *h, Evas *e, const char *src_id, const char
 		return LB_STATUS_ERROR_MEMORY;
 	}
 
+	obj_info->parent = edje;
+
 	child = malloc(sizeof(*child));
 	if (!child) {
 		ErrPrint("Error: %s\n", strerror(errno));
@@ -1098,6 +1150,7 @@ PUBLIC int script_update_script(void *h, Evas *e, const char *src_id, const char
 
 	DbgPrint("%s part swallow edje %p\n", part, obj);
 	elm_object_part_content_set(edje, part, obj);
+
 	obj_info = evas_object_data_get(edje, "obj_info");
 	obj_info->children = eina_list_append(obj_info->children, child);
 	return LB_STATUS_SUCCESS;
@@ -1237,16 +1290,17 @@ PUBLIC int script_load(void *_handle, Evas *e, int w, int h)
 		return LB_STATUS_ERROR_MEMORY;
 	}
 
-	obj_info->win = evas_object_rectangle_add(e);
-	if (!obj_info->win) {
+	obj_info->parent = evas_object_rectangle_add(e);
+	if (!obj_info->parent) {
+		ErrPrint("Unable to create a parent box\n");
 		free(obj_info);
 		return LB_STATUS_ERROR_FAULT;
 	}
 
-	edje = elm_layout_add(obj_info->win);
+	edje = elm_layout_add(obj_info->parent);
 	if (!edje) {
 		ErrPrint("Failed to create an edje object\n");
-		evas_object_del(obj_info->win);
+		evas_object_del(obj_info->parent);
 		free(obj_info);
 		return LB_STATUS_ERROR_FAULT;
 	}
@@ -1260,7 +1314,7 @@ PUBLIC int script_load(void *_handle, Evas *e, int w, int h)
 		errmsg = edje_load_error_str(err);
 		ErrPrint("Could not load %s from %s: %s\n", handle->group, handle->file, errmsg);
 		evas_object_del(edje);
-		evas_object_del(obj_info->win);
+		evas_object_del(obj_info->parent);
 		free(obj_info);
 		return LB_STATUS_ERROR_IO;
 	}
@@ -1285,13 +1339,26 @@ PUBLIC int script_unload(void *_handle, Evas *e)
 {
 	struct info *handle;
 	Evas_Object *edje;
+	Evas_Object *parent = NULL;
 
 	handle = _handle;
 
 	DbgPrint("Unload edje: %s - %s\n", handle->file, handle->group);
 	edje = eina_list_nth(handle->obj_list, 0);
-	if (edje)
+	if (edje) {
+		struct obj_info *obj_info;
+
+		obj_info = evas_object_data_get(edje, "obj_info");
+		if (obj_info)
+			parent = obj_info->parent;
 		evas_object_del(edje);
+	}
+
+	if (parent) {
+		DbgPrint("Delete parent box\n");
+		evas_object_del(parent);
+	}
+
 	handle->e = NULL;
 	return LB_STATUS_SUCCESS;
 }
@@ -1393,9 +1460,7 @@ static void font_size_cb(system_settings_key_e key, void *user_data)
 	}
 
 	s_info.font_size = size;
-	DbgPrint("Font size is changed to %d\n", size);
-
-	update_font_cb(NULL);
+	DbgPrint("Font size is changed to %d, but don't update the font info\n", size);
 }
 
 PUBLIC int script_init(void)
