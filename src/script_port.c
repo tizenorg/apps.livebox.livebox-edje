@@ -838,6 +838,7 @@ PUBLIC int script_update_image(void *_h, Evas *e, const char *id, const char *pa
 		evas_object_image_fill_set(img, 0, 0, w, h);
 		evas_object_size_hint_fill_set(img, EVAS_HINT_FILL, EVAS_HINT_FILL);
 		evas_object_size_hint_weight_set(img, EVAS_HINT_EXPAND, EVAS_HINT_EXPAND);
+		evas_object_image_filled_set(img, EINA_TRUE);
 	}
 
 	/*!
