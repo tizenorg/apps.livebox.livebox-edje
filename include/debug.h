@@ -14,6 +14,18 @@
  * limitations under the License.
  */
 
-#define DbgPrint(format, arg...)	LOGD("[[32m%s/%s[0m:%d] " format, basename(__FILE__), __func__, __LINE__, ##arg)
-#define ErrPrint(format, arg...)	LOGE("[[32m%s/%s[0m:%d] " format, basename(__FILE__), __func__, __LINE__, ##arg)
+#if !defined(SECURE_LOGD)
+#define SECURE_LOGD LOGD
+#endif
+
+#if !defined(SECURE_LOGE)
+#define SECURE_LOGE LOGE
+#endif
+
+#if !defined(SECURE_LOGW)
+#define SECURE_LOGW LOGW
+#endif
+
+#define DbgPrint(format, arg...)	SECURE_LOGD("[[32m%s/%s[0m:%d] " format, basename(__FILE__), __func__, __LINE__, ##arg)
+#define ErrPrint(format, arg...)	SECURE_LOGE("[[32m%s/%s[0m:%d] " format, basename(__FILE__), __func__, __LINE__, ##arg)
 /* End of a file */

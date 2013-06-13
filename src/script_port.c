@@ -85,9 +85,13 @@ struct obj_info {
 static struct {
 	char *font_name;
 	int font_size;
+
+	Eina_List *handle_list;
 } s_info = {
 	.font_name = NULL,
 	.font_size = -100,
+
+	.handle_list = NULL,
 };
 
 static inline double scale_get(void)
@@ -838,6 +842,7 @@ PUBLIC int script_update_image(void *_h, Evas *e, const char *id, const char *pa
 		evas_object_image_fill_set(img, 0, 0, w, h);
 		evas_object_size_hint_fill_set(img, EVAS_HINT_FILL, EVAS_HINT_FILL);
 		evas_object_size_hint_weight_set(img, EVAS_HINT_EXPAND, EVAS_HINT_EXPAND);
+		evas_object_image_filled_set(img, EINA_TRUE);
 	}
 
 	/*!
@@ -1357,6 +1362,8 @@ PUBLIC void *script_create(const char *file, const char *group)
 		return NULL;
 	}
 
+	s_info.handle_list = eina_list_append(s_info.handle_list, handle);
+
 	return handle;
 }
 
@@ -1366,6 +1373,13 @@ PUBLIC int script_destroy(void *_handle)
 	Evas_Object *edje;
 
 	handle = _handle;
+
+	if (!eina_list_data_find(s_info.handle_list, handle)) {
+		DbgPrint("Not found (already deleted?)\n");
+		return LB_STATUS_ERROR_NOT_EXIST;
+	}
+
+	s_info.handle_list = eina_list_remove(s_info.handle_list, handle);
 
 	edje = eina_list_nth(handle->obj_list, 0);
 	if (edje)
@@ -1602,8 +1616,16 @@ PUBLIC int script_init(void)
 PUBLIC int script_fini(void)
 {
 	int ret;
+	Eina_List *l;
+	Eina_List *n;
+	struct info *handle;
+
+	EINA_LIST_FOREACH_SAFE(s_info.handle_list, l, n, handle) {
+		script_destroy(handle);
+	}
+
 	ret = system_settings_unset_changed_cb(SYSTEM_SETTINGS_KEY_FONT_SIZE);
-	ret = system_settings_unset_changed_cb(SYSTEM_SETTINGS_KEY_FONT_TYPE);
+	ret = vconf_ignore_key_changed("db/setting/accessibility/font_name", font_changed_cb);
 	ret = vconf_ignore_key_changed(VCONFKEY_SETAPPL_ACCESSIBILITY_TTS, access_cb);
 	elm_shutdown();
 	return LB_STATUS_SUCCESS;
