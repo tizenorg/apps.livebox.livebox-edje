@@ -146,12 +146,10 @@ static inline void rebuild_focus_chain(Evas_Object *obj)
 
 	elm_object_focus_custom_chain_unset(obj);
 
-	DbgPrint("Rebuild focus chain begin\n");
 	EINA_LIST_FOREACH(obj_info->access_chain, l, ao) {
 		DbgPrint("Append %p\n", ao);
 		elm_object_focus_custom_chain_append(obj, ao, NULL);
 	}
-	DbgPrint("Rebuild focus chain done\n");
 }
 
 PUBLIC const char *script_magic_id(void)
@@ -697,7 +695,8 @@ PUBLIC int script_update_image(void *_h, Evas *e, const char *id, const char *pa
 			if (evas_object_image_region_support_get(img)) {
 				evas_object_image_load_region_set(img, (w - part_w) / 2, (h - part_h) / 2, part_w, part_h);
 				evas_object_image_load_size_set(img, part_w, part_h);
-				evas_object_image_fill_set(img, 0, 0, part_w, part_h);
+				evas_object_image_filled_set(img, EINA_TRUE);
+				//evas_object_image_fill_set(img, 0, 0, part_w, part_h);
 				DbgPrint("Size: %dx%d (region: %dx%d - %dx%d)\n", w, h, (w - part_w) / 2, (h - part_h) / 2, part_w, part_h);
 			} else {
 				Ecore_Evas *ee;
@@ -891,7 +890,6 @@ static void script_signal_cb(void *data, Evas_Object *obj, const char *emission,
 		ey = (double)(py + ph) / (double)h;
 	}
 
-	DbgPrint("Signal emit: source[%s], emission[%s]\n", source, emission);
 	script_signal_emit(handle->e, source, emission, sx, sy, ex, ey);
 }
 
@@ -980,8 +978,6 @@ PUBLIC int script_feed_event(void *h, Evas *e, int event_type, int x, int y, int
 	Evas_Object *edje;
 	struct obj_info *obj_info;
 	int ret = LB_STATUS_SUCCESS;
-
-	DbgPrint("event: %d, x: %d, y: %d\n", event_type, x, y);
 
 	edje = find_edje(handle, NULL); /*!< Get the base layout */
 	if (!edje) {
@@ -1125,11 +1121,9 @@ PUBLIC int script_update_script(void *h, Evas *e, const char *src_id, const char
 	struct child *child;
 	char _target_id[32];
 
-	DbgPrint("src_id[%s] target_id[%s] part[%s] path[%s] group[%s]\n", src_id, target_id, part, path, group);
-
 	edje = find_edje(handle, src_id);
 	if (!edje) {
-		ErrPrint("Edje is not exists\n");
+		ErrPrint("Edje is not exists (%s)\n", src_id);
 		return LB_STATUS_ERROR_NOT_EXIST;
 	}
 
@@ -1268,8 +1262,6 @@ PUBLIC int script_update_signal(void *h, Evas *e, const char *id, const char *pa
 	struct info *handle = h;
 	Evas_Object *edje;
 
-	DbgPrint("id[%s], part[%s], signal[%s]\n", id, part, signal);
-
 	edje = find_edje(handle, id);
 	if (!edje)
 		return LB_STATUS_ERROR_NOT_EXIST;
@@ -1282,8 +1274,6 @@ PUBLIC int script_update_drag(void *h, Evas *e, const char *id, const char *part
 {
 	struct info *handle = h;
 	Evas_Object *edje;
-
-	DbgPrint("id[%s], part[%s], %lfx%lf\n", id, part, x, y);
 
 	edje = find_edje(handle, id);
 	if (!edje)
@@ -1316,8 +1306,6 @@ PUBLIC int script_update_category(void *h, Evas *e, const char *id, const char *
 {
 	struct info *handle = h;
 
-	DbgPrint("id[%s], category[%s]\n", id, category);
-
 	if (handle->category) {
 		free(handle->category);
 		handle->category = NULL;
@@ -1338,8 +1326,6 @@ PUBLIC int script_update_category(void *h, Evas *e, const char *id, const char *
 PUBLIC void *script_create(const char *file, const char *group)
 {
 	struct info *handle;
-
-	DbgPrint("file[%s], group[%s]\n", file, group);
 
 	handle = calloc(1, sizeof(*handle));
 	if (!handle) {
@@ -1421,7 +1407,6 @@ PUBLIC int script_load(void *_handle, Evas *e, int w, int h)
 		return LB_STATUS_ERROR_FAULT;
 	}
 
-	DbgPrint("Load edje: %s - %s\n", handle->file, handle->group);
 	if (!elm_layout_file_set(edje, handle->file, handle->group)) {
  		int err;
 		const char *errmsg;
@@ -1459,7 +1444,6 @@ PUBLIC int script_unload(void *_handle, Evas *e)
 
 	handle = _handle;
 
-	DbgPrint("Unload edje: %s - %s\n", handle->file, handle->group);
 	edje = eina_list_nth(handle->obj_list, 0);
 	if (edje) {
 		struct obj_info *obj_info;
