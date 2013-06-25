@@ -715,6 +715,8 @@ PUBLIC int script_update_image(void *_h, Evas *e, const char *id, const char *pa
 					return LB_STATUS_ERROR_FAULT;
 				}
 
+				ecore_evas_alpha_set(ee, EINA_TRUE);
+
 				e = ecore_evas_get(ee);
 				if (!e) {
 					ErrPrint("Unable to get Evas\n");
@@ -737,6 +739,9 @@ PUBLIC int script_update_image(void *_h, Evas *e, const char *id, const char *pa
 					return LB_STATUS_ERROR_FAULT;
 				}
 
+				evas_object_image_alpha_set(src_img, EINA_TRUE);
+				evas_object_image_colorspace_set(src_img, EVAS_COLORSPACE_ARGB8888);
+        			evas_object_image_smooth_scale_set(src_img, EINA_TRUE);
 				evas_object_image_load_orientation_set(src_img, img_opt.orient);
 				evas_object_image_file_set(src_img, path, NULL);
 				err = evas_object_image_load_error_get(src_img);

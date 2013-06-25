@@ -1,6 +1,6 @@
 Name: liblivebox-edje
 Summary: EDJE Script loader for the data provider master
-Version: 0.5.9
+Version: 0.5.10
 Release: 1
 Group: HomeTF/Livebox
 License: Flora License
