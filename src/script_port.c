@@ -1495,22 +1495,33 @@ static void font_changed_cb(keynode_t *node, void *user_data)
 {
 	char *font_name;
 
-	font_name = vconf_get_str("db/setting/accessibility/font_name");
-	if (!font_name) {
-		ErrPrint("Invalid font name (NULL)\n");
-		return;
-	}
-
-	if (s_info.font_name && !strcmp(s_info.font_name, font_name)) {
-		DbgPrint("Font is not changed (Old: %s(%p) <> New: %s(%p))\n", s_info.font_name, s_info.font_name, font_name, font_name);
-		free(font_name);
-		return;
-	}
-
 	if (s_info.font_name) {
+		font_name = vconf_get_str("db/setting/accessibility/font_name");
+		if (!font_name) {
+			ErrPrint("Invalid font name (NULL)\n");
+			return;
+		}
+
+		if (!strcmp(s_info.font_name, font_name)) {
+			DbgPrint("Font is not changed (Old: %s(%p) <> New: %s(%p))\n", s_info.font_name, s_info.font_name, font_name, font_name);
+			free(font_name);
+			return;
+		}
+
 		DbgPrint("Release old font name: %s(%p)\n", s_info.font_name, s_info.font_name);
 		free(s_info.font_name);
-		s_info.font_name = NULL;
+	} else {
+		int ret;
+
+		/*!
+		 * Get the first font name using system_settings API.
+		 */
+		font_name = NULL;
+		ret = system_settings_get_value_string(SYSTEM_SETTINGS_KEY_FONT_TYPE, &font_name);
+		if (ret != SYSTEM_SETTINGS_ERROR_NONE || !font_name) {
+			ErrPrint("System setting get: %d, font_name[%p]\n", ret, font_name);
+			return;
+		}
 	}
 
 	s_info.font_name = font_name;
@@ -1571,20 +1582,17 @@ static void font_size_cb(system_settings_key_e key, void *user_data)
 PUBLIC int script_init(void)
 {
 	int ret;
-	int size = DEFAULT_FONT_SIZE;
 	char *argv[] = {
 		"livebox.edje",
 		NULL,
 	};
+
 	/* ecore is already initialized */
 	elm_init(1, argv);
 	elm_config_scale_set(scale_get());
 
 	ret = vconf_notify_key_changed(VCONFKEY_SETAPPL_ACCESSIBILITY_TTS, access_cb, NULL);
-	if (ret < 0)
-		ErrPrint("Failed to access cb\n");
-
-	access_cb(NULL, NULL);
+	DbgPrint("TTS changed: %d\n", ret);
 
 	ret = vconf_notify_key_changed("db/setting/accessibility/font_name", font_changed_cb, NULL);
 	DbgPrint("System font is changed: %d\n", ret);
@@ -1592,13 +1600,9 @@ PUBLIC int script_init(void)
 	ret = system_settings_set_changed_cb(SYSTEM_SETTINGS_KEY_FONT_SIZE, font_size_cb, NULL);
 	DbgPrint("System font size is changed: %d\n", ret);
 
-	s_info.font_name = vconf_get_str("db/setting/accessibility/font_name");
-	DbgPrint("Current font: %s\n", s_info.font_name);
-
-	ret = system_settings_get_value_int(SYSTEM_SETTINGS_KEY_FONT_SIZE, &size);
-	s_info.font_size = convert_font_size(size);
-	DbgPrint("Current size: %d\n", s_info.font_size);
-
+	access_cb(NULL, NULL);
+	font_changed_cb(NULL, NULL);
+	font_size_cb(SYSTEM_SETTINGS_KEY_FONT_SIZE, NULL);
 	return LB_STATUS_SUCCESS;
 }
 
@@ -1615,11 +1619,17 @@ PUBLIC int script_fini(void)
 
 	ret = system_settings_unset_changed_cb(SYSTEM_SETTINGS_KEY_FONT_SIZE);
 	DbgPrint("Unset font size change event callback: %d\n", ret);
+
 	ret = vconf_ignore_key_changed("db/setting/accessibility/font_name", font_changed_cb);
 	DbgPrint("Unset font name change event callback: %d\n", ret);
+
 	ret = vconf_ignore_key_changed(VCONFKEY_SETAPPL_ACCESSIBILITY_TTS, access_cb);
 	DbgPrint("Unset tts: %d\n", ret);
+
 	elm_shutdown();
+
+	free(s_info.font_name);
+	s_info.font_name = NULL;
 	return LB_STATUS_SUCCESS;
 }
 
