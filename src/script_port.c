@@ -1614,8 +1614,11 @@ PUBLIC int script_fini(void)
 	}
 
 	ret = system_settings_unset_changed_cb(SYSTEM_SETTINGS_KEY_FONT_SIZE);
+	DbgPrint("Unset font size change event callback: %d\n", ret);
 	ret = vconf_ignore_key_changed("db/setting/accessibility/font_name", font_changed_cb);
+	DbgPrint("Unset font name change event callback: %d\n", ret);
 	ret = vconf_ignore_key_changed(VCONFKEY_SETAPPL_ACCESSIBILITY_TTS, access_cb);
+	DbgPrint("Unset tts: %d\n", ret);
 	elm_shutdown();
 	return LB_STATUS_SUCCESS;
 }
