@@ -291,7 +291,6 @@ PUBLIC int script_update_text(void *h, Evas *e, const char *id, const char *part
 		}
 
 		elm_access_info_set(ao, ELM_ACCESS_INFO, utf8);
-		DbgPrint("[%s] Update access object (%s)\n", part, utf8);
 		free(utf8);
 	} else {
 		ErrPrint("Unable to get text part[%s]\n", part);
@@ -522,7 +521,6 @@ PUBLIC int script_update_access(void *_h, Evas *e, const char *id, const char *p
 
 		ao = evas_object_data_get(to, "ao");
 		if (ao) {
-			DbgPrint("[%s] Update access object (%s)\n", part, text);
 			if (text && strlen(text)) {
 				elm_access_info_set(ao, ELM_ACCESS_INFO, text);
 			} else {
