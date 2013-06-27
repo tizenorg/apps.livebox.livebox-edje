@@ -26,6 +26,6 @@
 #define SECURE_LOGW LOGW
 #endif
 
-#define DbgPrint(format, arg...)	SECURE_LOGD("[[32m%s/%s[0m:%d] " format, basename(__FILE__), __func__, __LINE__, ##arg)
-#define ErrPrint(format, arg...)	SECURE_LOGE("[[32m%s/%s[0m:%d] " format, basename(__FILE__), __func__, __LINE__, ##arg)
+#define DbgPrint(format, arg...)	SECURE_LOGD(format, ##arg)
+#define ErrPrint(format, arg...)	SECURE_LOGE(format, ##arg)
 /* End of a file */
