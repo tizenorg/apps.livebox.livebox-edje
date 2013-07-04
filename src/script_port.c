@@ -51,7 +51,7 @@ struct image_option {
 	enum {
 		FILL_DISABLE,
 		FILL_IN_SIZE,
-		FILL_OVER_SIZE,
+		FILL_OVER_SIZE
 	} fill;
 
 	int width;
@@ -405,7 +405,7 @@ static inline void parse_image_option(const char *option, struct image_option *i
 		STATE_DATA,
 		STATE_IGNORE,
 		STATE_ERROR,
-		STATE_END,
+		STATE_END
 	} state;
 	int idx;
 	int tag;
