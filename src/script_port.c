@@ -219,10 +219,10 @@ static void activate_cb(void *data, Evas_Object *part_obj, Elm_Object_Item *item
 	}
 
 	DbgPrint("Cursor is on %dx%d\n", x, y);
-	evas_event_feed_mouse_move(e, x, y, timestamp, NULL);
-	evas_event_feed_mouse_down(e, 1, EVAS_BUTTON_NONE, timestamp + 0.01f, NULL);
-	evas_event_feed_mouse_move(e, x, y, timestamp + 0.02f, NULL);
-	evas_event_feed_mouse_up(e, 1, EVAS_BUTTON_NONE, timestamp + 0.03f, NULL);
+	evas_event_feed_mouse_move(e, x, y, timestamp * 1000, NULL);
+	evas_event_feed_mouse_down(e, 1, EVAS_BUTTON_NONE, (timestamp + 0.01f) * 1000, NULL);
+	evas_event_feed_mouse_move(e, x, y, (timestamp + 0.02f) * 1000, NULL);
+	evas_event_feed_mouse_up(e, 1, EVAS_BUTTON_NONE, (timestamp + 0.03f) * 1000, NULL);
 }
 
 PUBLIC int script_update_text(void *h, Evas *e, const char *id, const char *part, const char *text)
@@ -1088,21 +1088,21 @@ PUBLIC int script_feed_event(void *h, Evas *e, int event_type, int x, int y, int
 	} else if (event_type & LB_SCRIPT_MOUSE_EVENT) {
 		switch (event_type) {
 		case LB_SCRIPT_MOUSE_DOWN:
-			evas_event_feed_mouse_move(e, x, y, timestamp, NULL);
-			evas_event_feed_mouse_down(e, 1, EVAS_BUTTON_NONE, timestamp + 0.01f, NULL);
+			evas_event_feed_mouse_move(e, x, y, timestamp * 1000, NULL);
+			evas_event_feed_mouse_down(e, 1, EVAS_BUTTON_NONE, (timestamp + 0.01f) * 1000, NULL);
 			break;
 		case LB_SCRIPT_MOUSE_MOVE:
-			evas_event_feed_mouse_move(e, x, y, timestamp, NULL);
+			evas_event_feed_mouse_move(e, x, y, timestamp * 1000, NULL);
 			break;
 		case LB_SCRIPT_MOUSE_UP:
-			evas_event_feed_mouse_move(e, x, y, timestamp, NULL);
-			evas_event_feed_mouse_up(e, 1, EVAS_BUTTON_NONE, timestamp + 0.1f, NULL);
+			evas_event_feed_mouse_move(e, x, y, timestamp * 1000, NULL);
+			evas_event_feed_mouse_up(e, 1, EVAS_BUTTON_NONE, (timestamp + 0.1f) * 1000, NULL);
 			break;
 		case LB_SCRIPT_MOUSE_IN:
-			evas_event_feed_mouse_in(e, timestamp, NULL);
+			evas_event_feed_mouse_in(e, timestamp * 1000, NULL);
 			break;
 		case LB_SCRIPT_MOUSE_OUT:
-			evas_event_feed_mouse_out(e, timestamp, NULL);
+			evas_event_feed_mouse_out(e, timestamp * 1000, NULL);
 			break;
 		default:
 			return LB_STATUS_ERROR_INVALID;
