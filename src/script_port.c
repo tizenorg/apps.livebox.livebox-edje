@@ -995,52 +995,48 @@ PUBLIC int script_feed_event(void *h, Evas *e, int event_type, int x, int y, int
 	}
 
 	if (event_type & LB_SCRIPT_ACCESS_EVENT) {
-		Elm_Access_Action_Info *info;
+		Elm_Access_Action_Info info;
 		Elm_Access_Action_Type action;
 		const Eina_List *chain;
 
-		info = calloc(1, sizeof(*info));
-		if (!info) {
-			ErrPrint("Error: %s\n", strerror(errno));
-			return LB_STATUS_ERROR_MEMORY;
-		}
+		memset(&info, 0, sizeof(info));
 
 		chain = elm_object_focus_custom_chain_get(edje);
 		DbgPrint("Focus chain : %d\n", eina_list_count(chain));
 
 		if ((event_type & LB_SCRIPT_ACCESS_HIGHLIGHT) == LB_SCRIPT_ACCESS_HIGHLIGHT) {
 			action = ELM_ACCESS_ACTION_HIGHLIGHT;
-			info->x = x;
-			info->y = y;
-			ret = elm_access_action(edje, action, info);
+			info.x = x;
+			info.y = y;
+			ret = elm_access_action(edje, action, &info);
 			DbgPrint("ACCESS_HIGHLIGHT: %dx%d returns %d\n", x, y, ret);
 			ret = (ret == EINA_FALSE) ? LB_ACCESS_STATUS_ERROR : LB_ACCESS_STATUS_DONE;
 		} else if ((event_type & LB_SCRIPT_ACCESS_HIGHLIGHT_NEXT) == LB_SCRIPT_ACCESS_HIGHLIGHT_NEXT) {
 			action = ELM_ACCESS_ACTION_HIGHLIGHT_NEXT;
-			info->highlight_cycle = EINA_FALSE;
-			ret = elm_access_action(edje, action, info);
+			info.highlight_cycle = EINA_FALSE;
+			ret = elm_access_action(edje, action, &info);
 			DbgPrint("ACCESS_HIGHLIGHT_NEXT, returns %d\n", ret);
 			ret = (ret == EINA_FALSE) ? LB_ACCESS_STATUS_LAST : LB_ACCESS_STATUS_DONE;
 		} else if ((event_type & LB_SCRIPT_ACCESS_HIGHLIGHT_PREV) == LB_SCRIPT_ACCESS_HIGHLIGHT_PREV) {
 			action = ELM_ACCESS_ACTION_HIGHLIGHT_PREV;
-			info->highlight_cycle = EINA_FALSE;
-			ret = elm_access_action(edje, action, info);
+			info.highlight_cycle = EINA_FALSE;
+			ret = elm_access_action(edje, action, &info);
 			DbgPrint("ACCESS_HIGHLIGHT_PREV, returns %d\n", ret);
 			ret = (ret == EINA_FALSE) ? LB_ACCESS_STATUS_FIRST : LB_ACCESS_STATUS_DONE;
 		} else if ((event_type & LB_SCRIPT_ACCESS_ACTIVATE) == LB_SCRIPT_ACCESS_ACTIVATE) {
 			action = ELM_ACCESS_ACTION_ACTIVATE;
-			ret = elm_access_action(edje, action, info);
+			ret = elm_access_action(edje, action, &info);
 			DbgPrint("ACCESS_ACTIVATE, returns %d\n", ret);
 			ret = (ret == EINA_FALSE) ? LB_ACCESS_STATUS_ERROR : LB_ACCESS_STATUS_DONE;
 		} else if ((event_type & LB_SCRIPT_ACCESS_ACTION) == LB_SCRIPT_ACCESS_ACTION) {
 			if (down == 0) {
 				action = ELM_ACCESS_ACTION_UP;
-				ret = elm_access_action(edje, action, info);
+				ret = elm_access_action(edje, action, &info);
 				DbgPrint("ACCESS_ACTION(%d), returns %d\n", down, ret);
 				ret = (ret == EINA_FALSE) ? LB_ACCESS_STATUS_ERROR : LB_ACCESS_STATUS_DONE;
 			} else if (down == 1) {
 				action = ELM_ACCESS_ACTION_DOWN;
-				ret = elm_access_action(edje, action, info);
+				ret = elm_access_action(edje, action, &info);
 				DbgPrint("ACCESS_ACTION(%d), returns %d\n", down, ret);
 				ret = (ret == EINA_FALSE) ? LB_ACCESS_STATUS_ERROR : LB_ACCESS_STATUS_DONE;
 			} else {
@@ -1049,24 +1045,24 @@ PUBLIC int script_feed_event(void *h, Evas *e, int event_type, int x, int y, int
 			}
 		} else if ((event_type & LB_SCRIPT_ACCESS_SCROLL) == LB_SCRIPT_ACCESS_SCROLL) {
 			action = ELM_ACCESS_ACTION_SCROLL;
-			info->x = x;
-			info->y = y;
+			info.x = x;
+			info.y = y;
 			switch (down) {
 			case 0:
-				info->mouse_type = 0;
-				ret = elm_access_action(edje, action, info);
+				info.mouse_type = 0;
+				ret = elm_access_action(edje, action, &info);
 				DbgPrint("ACCESS_HIGHLIGHT_SCROLL, returns %d\n", ret);
 				ret = (ret == EINA_FALSE) ? LB_ACCESS_STATUS_ERROR : LB_ACCESS_STATUS_DONE;
 				break;
 			case -1:
-				info->mouse_type = 1;
-				ret = elm_access_action(edje, action, info);
+				info.mouse_type = 1;
+				ret = elm_access_action(edje, action, &info);
 				DbgPrint("ACCESS_HIGHLIGHT_SCROLL, returns %d\n", ret);
 				ret = (ret == EINA_FALSE) ? LB_ACCESS_STATUS_ERROR : LB_ACCESS_STATUS_DONE;
 				break;
 			case 1:
-				info->mouse_type = 2;
-				ret = elm_access_action(edje, action, info);
+				info.mouse_type = 2;
+				ret = elm_access_action(edje, action, &info);
 				DbgPrint("ACCESS_HIGHLIGHT_SCROLL, returns %d\n", ret);
 				ret = (ret == EINA_FALSE) ? LB_ACCESS_STATUS_ERROR : LB_ACCESS_STATUS_DONE;
 				break;
@@ -1076,7 +1072,7 @@ PUBLIC int script_feed_event(void *h, Evas *e, int event_type, int x, int y, int
 			}
 		} else if ((event_type & LB_SCRIPT_ACCESS_UNHIGHLIGHT) == LB_SCRIPT_ACCESS_UNHIGHLIGHT) {
 			action = ELM_ACCESS_ACTION_UNHIGHLIGHT;
-			ret = elm_access_action(edje, action, info);
+			ret = elm_access_action(edje, action, &info);
 			DbgPrint("ACCESS_UNHIGHLIGHT, returns %d\n", ret);
 			ret = (ret == EINA_FALSE) ? LB_ACCESS_STATUS_ERROR : LB_ACCESS_STATUS_DONE;
 		} else {
@@ -1084,7 +1080,6 @@ PUBLIC int script_feed_event(void *h, Evas *e, int event_type, int x, int y, int
 			ret = LB_ACCESS_STATUS_ERROR;
 		}
 
-		free(info);
 	} else if (event_type & LB_SCRIPT_MOUSE_EVENT) {
 		switch (event_type) {
 		case LB_SCRIPT_MOUSE_DOWN:
