@@ -116,16 +116,18 @@ static inline Evas_Object *find_edje(struct info *handle, const char *id)
 		}
 
 		if (!id) {
-			if (!obj_info->id)
+			if (!obj_info->id) {
 				return edje;
+			}
 
 			continue;
 		} else if (!obj_info->id) {
 			continue;
 		}
 
-		if (!strcmp(obj_info->id, id))
+		if (!strcmp(obj_info->id, id)) {
 			return edje;
+		}
 	}
 
 	DbgPrint("EDJE[%s] is not found\n", id);
@@ -165,8 +167,9 @@ PUBLIC int script_update_color(void *h, Evas *e, const char *id, const char *par
 	int ret;
 
 	edje = find_edje(handle, id);
-	if (!edje)
+	if (!edje) {
 		return LB_STATUS_ERROR_NOT_EXIST;
+	}
 
 	ret = sscanf(rgba, "%d %d %d %d %d %d %d %d %d %d %d %d",
 					r, g, b, a,			/* OBJECT */
@@ -199,12 +202,14 @@ static void activate_cb(void *data, Evas_Object *part_obj, Elm_Object_Item *item
 	double timestamp;
 
 	ao = evas_object_data_get(part_obj, "ao");
-	if (!ao)
+	if (!ao) {
 		return;
+	}
 
 	edje = evas_object_data_get(ao, "edje");
-	if (!edje)
+	if (!edje) {
 		return;
+	}
 
 	e = evas_object_evas_get(part_obj);
 	evas_object_geometry_get(part_obj, &x, &y, &w, &h);
@@ -307,8 +312,9 @@ static void parse_aspect(struct image_option *img_opt, const char *value, int le
 		len--;
 	}
 
-	if (len < 4)
+	if (len < 4) {
 		return;
+	}
 
 	img_opt->aspect = !strncasecmp(value, "true", 4);
 	DbgPrint("Parsed ASPECT: %d (%s)\n", img_opt->aspect, value);
@@ -321,8 +327,9 @@ static void parse_orient(struct image_option *img_opt, const char *value, int le
 		len--;
 	}
 
-	if (len < 4)
+	if (len < 4) {
 		return;
+	}
 
 	img_opt->orient = !strncasecmp(value, "true", 4);
 	DbgPrint("Parsed ORIENT: %d (%s)\n", img_opt->orient, value);
@@ -363,12 +370,13 @@ static void parse_fill(struct image_option *img_opt, const char *value, int len)
 		len--;
 	}
 
-	if (!strncasecmp(value, "in-size", len))
+	if (!strncasecmp(value, "in-size", len)) {
 		img_opt->fill = FILL_IN_SIZE;
-	else if (!strncasecmp(value, "over-size", len))
+	} else if (!strncasecmp(value, "over-size", len)) {
 		img_opt->fill = FILL_OVER_SIZE;
-	else
+	} else {
 		img_opt->fill = FILL_DISABLE;
+	}
 
 	DbgPrint("Parsed FILL: %d (%s)\n", img_opt->fill, value);
 }
@@ -410,8 +418,9 @@ static inline void parse_image_option(const char *option, struct image_option *i
 	int idx;
 	int tag;
 
-	if (!option || !*option)
+	if (!option || !*option) {
 		return;
+	}
 
 	state = STATE_START;
 	/*!
@@ -485,10 +494,11 @@ static inline void parse_image_option(const char *option, struct image_option *i
 			}
 			break;
 		case STATE_ERROR:
-			if (*ptr == ';')
+			if (*ptr == ';') {
 				state = STATE_START;
-			else if (*ptr == '\0')
+			} else if (*ptr == '\0') {
 				state = STATE_END;
+			}
 			break;
 		default:
 			break;
@@ -589,8 +599,9 @@ PUBLIC int script_update_image(void *_h, Evas *e, const char *id, const char *pa
 		Evas_Object *ao;
 
 		EINA_LIST_FOREACH_SAFE(obj_info->children, l, n, child) {
-			if (child->obj != img)
+			if (child->obj != img) {
 				continue;
+			}
 
 			obj_info->children = eina_list_remove(obj_info->children, child);
 			free(child->part);
@@ -919,8 +930,9 @@ static void edje_del_cb(void *_info, Evas *e, Evas_Object *obj, void *event_info
 		Eina_List *n;
 
 		EINA_LIST_FOREACH_SAFE(parent_obj_info->children, l, n, child) {
-			if (child->obj != obj)
+			if (child->obj != obj) {
 				continue;
+			}
 
 			/*!
 			 * \note
@@ -997,12 +1009,8 @@ PUBLIC int script_feed_event(void *h, Evas *e, int event_type, int x, int y, int
 	if (event_type & LB_SCRIPT_ACCESS_EVENT) {
 		Elm_Access_Action_Info info;
 		Elm_Access_Action_Type action;
-		const Eina_List *chain;
 
 		memset(&info, 0, sizeof(info));
-
-		chain = elm_object_focus_custom_chain_get(edje);
-		DbgPrint("Focus chain : %d\n", eina_list_count(chain));
 
 		if ((event_type & LB_SCRIPT_ACCESS_HIGHLIGHT) == LB_SCRIPT_ACCESS_HIGHLIGHT) {
 			action = ELM_ACCESS_ACTION_HIGHLIGHT;
@@ -1137,8 +1145,9 @@ PUBLIC int script_update_script(void *h, Evas *e, const char *src_id, const char
 		Eina_List *n;
 
 		EINA_LIST_FOREACH_SAFE(obj_info->children, l, n, child) {
-			if (child->obj != obj)
+			if (child->obj != obj) {
 				continue;
+			}
 
 			obj_info->children = eina_list_remove(obj_info->children, child);
 
@@ -1193,11 +1202,8 @@ PUBLIC int script_update_script(void *h, Evas *e, const char *src_id, const char
 
 	if (!elm_layout_file_set(obj, path, group)) {
  		int err;
-		const char *errmsg;
-
 		err = edje_object_load_error_get(elm_layout_edje_get(obj));
-		errmsg = edje_load_error_str(err);
-		ErrPrint("Could not load %s from %s: %s\n", group, path, errmsg);
+		ErrPrint("Could not load %s from %s: %s\n", group, path, edje_load_error_str(err));
 		evas_object_del(obj);
 		return LB_STATUS_ERROR_IO;
 	}
@@ -1261,8 +1267,9 @@ PUBLIC int script_update_signal(void *h, Evas *e, const char *id, const char *pa
 	Evas_Object *edje;
 
 	edje = find_edje(handle, id);
-	if (!edje)
+	if (!edje) {
 		return LB_STATUS_ERROR_NOT_EXIST;
+	}
 
 	elm_object_signal_emit(edje, signal, part);
 	return LB_STATUS_SUCCESS;
@@ -1274,8 +1281,9 @@ PUBLIC int script_update_drag(void *h, Evas *e, const char *id, const char *part
 	Evas_Object *edje;
 
 	edje = find_edje(handle, id);
-	if (!edje)
+	if (!edje) {
 		return LB_STATUS_ERROR_NOT_EXIST;
+	}
 
 	edje_object_part_drag_value_set(elm_layout_edje_get(edje), part, x, y);
 	return LB_STATUS_SUCCESS;
@@ -1287,8 +1295,9 @@ PUBLIC int script_update_size(void *han, Evas *e, const char *id, int w, int h)
 	Evas_Object *edje;
 
 	edje = find_edje(handle, id);
-	if (!edje)
+	if (!edje) {
 		return LB_STATUS_ERROR_NOT_EXIST;
+	}
 
 	if (!id) {
 		handle->w = w;
@@ -1309,8 +1318,9 @@ PUBLIC int script_update_category(void *h, Evas *e, const char *id, const char *
 		handle->category = NULL;
 	}
 
-	if (!category)
+	if (!category) {
 		return LB_STATUS_SUCCESS;
+	}
 
 	handle->category = strdup(category);
 	if (!handle->category) {
@@ -1366,8 +1376,9 @@ PUBLIC int script_destroy(void *_handle)
 	s_info.handle_list = eina_list_remove(s_info.handle_list, handle);
 
 	edje = eina_list_nth(handle->obj_list, 0);
-	if (edje)
+	if (edje) {
 		evas_object_del(edje);
+	}
 
 	free(handle->category);
 	free(handle->file);
@@ -1407,11 +1418,9 @@ PUBLIC int script_load(void *_handle, Evas *e, int w, int h)
 
 	if (!elm_layout_file_set(edje, handle->file, handle->group)) {
  		int err;
-		const char *errmsg;
 
 		err = edje_object_load_error_get(elm_layout_edje_get(edje));
-		errmsg = edje_load_error_str(err);
-		ErrPrint("Could not load %s from %s: %s\n", handle->group, handle->file, errmsg);
+		ErrPrint("Could not load %s from %s: %s\n", handle->group, handle->file, edje_load_error_str(err));
 		evas_object_del(edje);
 		evas_object_del(obj_info->parent);
 		free(obj_info);
@@ -1447,8 +1456,9 @@ PUBLIC int script_unload(void *_handle, Evas *e)
 		struct obj_info *obj_info;
 
 		obj_info = evas_object_data_get(edje, "obj_info");
-		if (obj_info)
+		if (obj_info) {
 			parent = obj_info->parent;
+		}
 		evas_object_del(edje);
 	}
 
@@ -1558,8 +1568,9 @@ static void font_size_cb(system_settings_key_e key, void *user_data)
 {
 	int size;
 
-	if (system_settings_get_value_int(SYSTEM_SETTINGS_KEY_FONT_SIZE, &size) != SYSTEM_SETTINGS_ERROR_NONE)
+	if (system_settings_get_value_int(SYSTEM_SETTINGS_KEY_FONT_SIZE, &size) != SYSTEM_SETTINGS_ERROR_NONE) {
 		return;
+	}
 
 	size = convert_font_size(size);
 

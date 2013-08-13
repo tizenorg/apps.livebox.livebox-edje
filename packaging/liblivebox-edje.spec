@@ -1,6 +1,6 @@
 Name: liblivebox-edje
 Summary: EDJE Script loader for the data provider master
-Version: 0.5.14
+Version: 0.5.15
 Release: 1
 Group: HomeTF/Livebox
 License: Flora License
@@ -25,7 +25,12 @@ Plugin for the data provider master to load the edje scripts
 %setup -q
 
 %build
-cmake . -DCMAKE_INSTALL_PREFIX=%{_prefix}
+%if 0%{?tizen_build_binary_release_type_eng}
+export CFLAGS="${CFLAGS} -DTIZEN_ENGINEER_MODE"
+export CXXFLAGS="${CXXFLAGS} -DTIZEN_ENGINEER_MODE"
+export FFLAGS="${FFLAGS} -DTIZEN_ENGINEER_MODE"
+%endif
+%cmake .
 make %{?jobs:-j%jobs}
 
 %install
