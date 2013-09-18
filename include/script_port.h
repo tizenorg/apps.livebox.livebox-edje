@@ -51,7 +51,7 @@ extern int script_unload(void *handle, Evas *e);
 */
 extern int script_feed_event(void *h, Evas *e, int event_type, int x, int y, int down, double timestamp);
 
-extern int script_init(void);
+extern int script_init(double scale);
 extern int script_fini(void);
 
 extern const char *script_magic_id(void);

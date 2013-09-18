@@ -41,7 +41,6 @@
 
 #define TEXT_CLASS	"tizen"
 #define DEFAULT_FONT_SIZE	-100
-#define BASE_WIDTH	720.0f
 
 #define PUBLIC __attribute__((visibility("default")))
 
@@ -93,14 +92,6 @@ static struct {
 
 	.handle_list = NULL,
 };
-
-static inline double scale_get(void)
-{
-	int width;
-	int height;
-	ecore_x_window_size_get(0, &width, &height);
-	return (double)width / BASE_WIDTH;
-}
 
 static inline Evas_Object *find_edje(struct info *handle, const char *id)
 {
@@ -669,8 +660,8 @@ PUBLIC int script_update_image(void *_h, Evas *e, const char *id, const char *pa
 			Evas_Coord part_h;
 
 			if (img_opt.width >= 0 && img_opt.height >= 0) {
-				part_w = img_opt.width * scale_get();
-				part_h = img_opt.height * scale_get();
+				part_w = img_opt.width * elm_config_scale_get();
+				part_h = img_opt.height * elm_config_scale_get();
 			} else {
 				part_w = 0;
 				part_h = 0;
@@ -812,8 +803,8 @@ PUBLIC int script_update_image(void *_h, Evas *e, const char *id, const char *pa
 			Evas_Coord part_h;
 
 			if (img_opt.width >= 0 && img_opt.height >= 0) {
-				part_w = img_opt.width * scale_get();
-				part_h = img_opt.height * scale_get();
+				part_w = img_opt.width * elm_config_scale_get();
+				part_h = img_opt.height * elm_config_scale_get();
 			} else {
 				part_w = 0;
 				part_h = 0;
@@ -1200,6 +1191,8 @@ PUBLIC int script_update_script(void *h, Evas *e, const char *src_id, const char
 		return LB_STATUS_ERROR_FAULT;
 	}
 
+	edje_object_scale_set(elm_layout_edje_get(obj), elm_config_scale_get());
+
 	if (!elm_layout_file_set(obj, path, group)) {
  		int err;
 		err = edje_object_load_error_get(elm_layout_edje_get(obj));
@@ -1416,6 +1409,8 @@ PUBLIC int script_load(void *_handle, Evas *e, int w, int h)
 		return LB_STATUS_ERROR_FAULT;
 	}
 
+	edje_object_scale_set(elm_layout_edje_get(edje), elm_config_scale_get());
+
 	if (!elm_layout_file_set(edje, handle->file, handle->group)) {
  		int err;
 
@@ -1583,7 +1578,7 @@ static void font_size_cb(system_settings_key_e key, void *user_data)
 	DbgPrint("Font size is changed to %d, but don't update the font info\n", size);
 }
 
-PUBLIC int script_init(void)
+PUBLIC int script_init(double scale)
 {
 	int ret;
 	char *argv[] = {
@@ -1593,7 +1588,8 @@ PUBLIC int script_init(void)
 
 	/* ecore is already initialized */
 	elm_init(1, argv);
-	elm_config_scale_set(scale_get());
+	elm_config_scale_set(scale);
+	DbgPrint("Scale is updated: %lf\n", scale);
 
 	ret = vconf_notify_key_changed(VCONFKEY_SETAPPL_ACCESSIBILITY_TTS, access_cb, NULL);
 	DbgPrint("TTS changed: %d\n", ret);
