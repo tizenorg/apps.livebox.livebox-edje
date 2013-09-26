@@ -189,7 +189,6 @@ static void activate_cb(void *data, Evas_Object *part_obj, Elm_Object_Item *item
 	int y;
 	int w;
 	int h;
-	struct timeval tv;
 	double timestamp;
 
 	ao = evas_object_data_get(part_obj, "ao");
@@ -207,12 +206,17 @@ static void activate_cb(void *data, Evas_Object *part_obj, Elm_Object_Item *item
 	x += w / 2;
 	y += h / 2;
 
+#if defined(_USE_ECORE_TIME_GET)
+	timestamp = ecore_time_get();
+#else
+	struct timeval tv;
 	if (gettimeofday(&tv, NULL) < 0) {
 		ErrPrint("Failed to get time\n");
 		timestamp = 0.0f;
 	} else {
 		timestamp = (double)tv.tv_sec + ((double)tv.tv_usec / 1000000.0f);
 	}
+#endif
 
 	DbgPrint("Cursor is on %dx%d\n", x, y);
 	evas_event_feed_mouse_move(e, x, y, timestamp * 1000, NULL);
@@ -1164,15 +1168,19 @@ PUBLIC int script_update_script(void *h, Evas *e, const char *src_id, const char
 	if (!target_id) {
 		if (find_edje(handle, part)) {
 			double timestamp;
-			struct timeval tv;
 
 			do {
+#if defined(_USE_ECORE_TIME_GET)
+				timestamp = ecore_time_get();
+#else
+				struct timeval tv;
 				if (gettimeofday(&tv, NULL) < 0) {
 					static int local_idx = 0;
 					timestamp = (double)(local_idx++);
 				} else {
 					timestamp = (double)tv.tv_sec + ((double)tv.tv_usec / 1000000.0f);
 				}
+#endif
 
 				snprintf(_target_id, sizeof(_target_id), "%lf", timestamp);
 			} while (find_edje(handle, _target_id));
