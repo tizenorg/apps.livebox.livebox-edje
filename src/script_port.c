@@ -974,6 +974,17 @@ static void edje_del_cb(void *_info, Evas *e, Evas_Object *obj, void *event_info
 	free(obj_info);
 }
 
+static inline Evas_Object *get_highlighted_object(Evas_Object *obj)
+{
+	Evas_Object *o, *ho;
+
+	o = evas_object_name_find(evas_object_evas_get(obj), "_elm_access_disp");
+	if (!o) return NULL;
+
+	ho = evas_object_data_get(o, "_elm_access_target");
+	return ho;
+}
+
 /*!
 	LB_ACCESS_HIGHLIGHT		0
 	LB_ACCESS_HIGHLIGHT_NEXT	1
@@ -1013,7 +1024,18 @@ PUBLIC int script_feed_event(void *h, Evas *e, int event_type, int x, int y, int
 			info.y = y;
 			ret = elm_access_action(edje, action, &info);
 			DbgPrint("ACCESS_HIGHLIGHT: %dx%d returns %d\n", x, y, ret);
-			ret = (ret == EINA_FALSE) ? LB_ACCESS_STATUS_ERROR : LB_ACCESS_STATUS_DONE;
+			if (ret == EINA_TRUE) {
+				if (!get_highlighted_object(edje)) {
+					ErrPrint("Highlighted object is not found\n");
+					ret = LB_ACCESS_STATUS_ERROR;
+				} else {
+					DbgPrint("Highlighted object is found\n");
+					ret = LB_ACCESS_STATUS_DONE;
+				}
+			} else {
+				ErrPrint("Action error\n");
+				ret = LB_ACCESS_STATUS_ERROR;
+			}
 		} else if ((event_type & LB_SCRIPT_ACCESS_HIGHLIGHT_NEXT) == LB_SCRIPT_ACCESS_HIGHLIGHT_NEXT) {
 			action = ELM_ACCESS_ACTION_HIGHLIGHT_NEXT;
 			info.highlight_cycle = EINA_FALSE;
