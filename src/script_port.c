@@ -558,6 +558,86 @@ PUBLIC int script_update_access(void *_h, Evas *e, const char *id, const char *p
 	return LB_STATUS_SUCCESS;
 }
 
+PUBLIC int script_operate_access(void *_h, Evas *e, const char *id, const char *part, const char *operation, const char *option)
+{
+	struct info *handle = _h;
+	Evas_Object *edje;
+	struct obj_info *obj_info;
+	Elm_Access_Action_Info action_info;
+	int ret;
+
+	if (!operation || !strlen(operation)) {
+		return LB_STATUS_ERROR_INVALID;
+	}
+
+	edje = find_edje(handle, id);
+	if (!edje) {
+		ErrPrint("No such object: %s\n", id);
+		return LB_STATUS_ERROR_NOT_EXIST;
+	}
+
+	obj_info = evas_object_data_get(edje, "obj_info");
+	if (!obj_info) {
+		ErrPrint("Object info is not available\n");
+		return LB_STATUS_ERROR_FAULT;
+	}
+
+	memset(&action_info, 0, sizeof(action_info));
+
+	/* OPERATION is defined in liblivebox package */
+	if (!strcasecmp(operation, "set,hl")) {
+		if (part) {
+			Evas_Object *to;
+			Evas_Coord x;
+			Evas_Coord y;
+			Evas_Coord w;
+			Evas_Coord h;
+
+			to = (Evas_Object *)edje_object_part_object_get(elm_layout_edje_get(edje), part);
+			if (!to) {
+				ErrPrint("Invalid part: %s\n", part);
+				goto out;
+			}
+
+			evas_object_geometry_get(to, &x, &y, &w, &h);
+
+			action_info.x = x + w / 2;
+			action_info.y = x + h / 2;
+		} else if (option && sscanf(option, "%dx%d", &action_info.x, &action_info.y) == 2) {
+		} else {
+			ErrPrint("Insufficient info for HL\n");
+			goto out;
+		}
+
+		DbgPrint("TXxTY: %dx%d\n", action_info.x, action_info.y);
+		ret = elm_access_action(edje, ELM_ACCESS_ACTION_HIGHLIGHT, &action_info);
+		if (ret == EINA_FALSE) {
+			ErrPrint("Action error\n");
+		}
+	} else if (!strcasecmp(operation, "unset,hl")) {
+		ret = elm_access_action(edje, ELM_ACCESS_ACTION_UNHIGHLIGHT, &action_info);
+		if (ret == EINA_FALSE) {
+			ErrPrint("Action error\n");
+		}
+	} else if (!strcasecmp(operation, "next,hl")) {
+		action_info.highlight_cycle = (!!option) && (!!strcasecmp(option, "no,cycle"));
+
+		ret = elm_access_action(edje, ELM_ACCESS_ACTION_HIGHLIGHT_NEXT, &action_info);
+		if (ret == EINA_FALSE) {
+			ErrPrint("Action error\n");
+		}
+	} else if (!strcasecmp(operation, "prev,hl")) {
+		action_info.highlight_cycle = EINA_TRUE;
+		ret = elm_access_action(edje, ELM_ACCESS_ACTION_HIGHLIGHT_PREV, &action_info);
+		if (ret == EINA_FALSE) {
+			ErrPrint("Action error\n");
+		}
+	}
+
+out:
+	return LB_STATUS_SUCCESS;
+}
+
 PUBLIC int script_update_image(void *_h, Evas *e, const char *id, const char *part, const char *path, const char *option)
 {
 	struct info *handle = _h;

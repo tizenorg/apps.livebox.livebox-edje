@@ -29,6 +29,7 @@ extern int script_update_color(void *h, Evas *e, const char *id, const char *par
 extern int script_update_text(void *h, Evas *e, const char *id, const char *part, const char *text);
 extern int script_update_image(void *h, Evas *e, const char *id, const char *part, const char *path, const char *option);
 extern int script_update_access(void *h, Evas *e, const char *id, const char *part, const char *text, const char *option);
+extern int script_operate_access(void *_h, Evas *e, const char *id, const char *part, const char *operation, const char *option);
 extern int script_update_script(void *h, Evas *e, const char *src_id, const char *target_id, const char *part, const char *path, const char *group);
 extern int script_update_signal(void *h, Evas *e, const char *id, const char *part, const char *signal);
 extern int script_update_drag(void *h, Evas *e, const char *id, const char *part, double x, double y);
