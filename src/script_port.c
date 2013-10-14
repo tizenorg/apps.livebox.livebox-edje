@@ -1196,7 +1196,7 @@ PUBLIC int script_feed_event(void *h, Evas *e, int event_type, int x, int y, int
 			break;
 		case LB_SCRIPT_MOUSE_UP:
 			evas_event_feed_mouse_move(e, x, y, timestamp * 1000, NULL);
-			evas_event_feed_mouse_up(e, 1, EVAS_BUTTON_NONE, (timestamp + 0.1f) * 1000, NULL);
+			evas_event_feed_mouse_up(e, 1, EVAS_BUTTON_NONE, (timestamp + 0.01f) * 1000, NULL);
 			break;
 		case LB_SCRIPT_MOUSE_IN:
 			evas_event_feed_mouse_in(e, timestamp * 1000, NULL);
