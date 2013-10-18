@@ -64,6 +64,8 @@ struct info {
 	int w;
 	int h;
 
+	int is_mouse_down;
+
 	Evas *e;
 
 	Eina_List *obj_list;
@@ -1186,17 +1188,41 @@ PUBLIC int script_feed_event(void *h, Evas *e, int event_type, int x, int y, int
 		}
 
 	} else if (event_type & LB_SCRIPT_MOUSE_EVENT) {
+		double cur_timestamp;
+
+#if defined(_USE_ECORE_TIME_GET)
+		cur_timestamp = ecore_time_get();
+#else
+		struct timeval tv;
+		if (gettimeofday(&tv, NULL) < 0) {
+			ErrPrint("Failed to get time\n");
+			cur_timestamp = 0.0f;
+		} else {
+			cur_timestamp = (double)tv.tv_sec + ((double)tv.tv_usec / 1000000.0f);
+		}
+#endif
+		if (cur_timestamp - timestamp > 0.1f && handle->is_mouse_down == 0) {
+			DbgPrint("Discard lazy event : %lf\n", cur_timestamp - timestamp);
+			return LB_STATUS_SUCCESS;
+		}
+
 		switch (event_type) {
 		case LB_SCRIPT_MOUSE_DOWN:
-			evas_event_feed_mouse_move(e, x, y, timestamp * 1000, NULL);
-			evas_event_feed_mouse_down(e, 1, EVAS_BUTTON_NONE, (timestamp + 0.01f) * 1000, NULL);
+			if (handle->is_mouse_down == 0) {
+				evas_event_feed_mouse_move(e, x, y, timestamp * 1000, NULL);
+				evas_event_feed_mouse_down(e, 1, EVAS_BUTTON_NONE, (timestamp + 0.01f) * 1000, NULL);
+				handle->is_mouse_down = 1;
+			}
 			break;
 		case LB_SCRIPT_MOUSE_MOVE:
 			evas_event_feed_mouse_move(e, x, y, timestamp * 1000, NULL);
 			break;
 		case LB_SCRIPT_MOUSE_UP:
-			evas_event_feed_mouse_move(e, x, y, timestamp * 1000, NULL);
-			evas_event_feed_mouse_up(e, 1, EVAS_BUTTON_NONE, (timestamp + 0.01f) * 1000, NULL);
+			if (handle->is_mouse_down == 1) {
+				evas_event_feed_mouse_move(e, x, y, timestamp * 1000, NULL);
+				evas_event_feed_mouse_up(e, 1, EVAS_BUTTON_NONE, (timestamp + 0.01f) * 1000, NULL);
+				handle->is_mouse_down = 0;
+			}
 			break;
 		case LB_SCRIPT_MOUSE_IN:
 			evas_event_feed_mouse_in(e, timestamp * 1000, NULL);
