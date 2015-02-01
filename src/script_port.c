@@ -13,12 +13,14 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#define _GNU_SOURCE
 
 #include <stdio.h>
 #include <libgen.h>
 #include <errno.h>
 #include <unistd.h>
 #include <ctype.h>
+#include <dlfcn.h>
 
 #include <Elementary.h>
 #include <Evas.h>
@@ -34,8 +36,9 @@
 #include <dlog.h>
 #include <debug.h>
 #include <vconf.h>
-#include <livebox-errno.h>
-#include <livebox-service.h>
+#include <dynamicbox_errno.h>
+#include <dynamicbox_service.h>
+#include <dynamicbox_script.h>
 
 #include "script_port.h"
 #include "abi.h"
@@ -45,13 +48,22 @@
 
 #define PUBLIC __attribute__((visibility("default")))
 
+#define ACCESS_TYPE_DOWN 0
+#define ACCESS_TYPE_MOVE 1
+#define ACCESS_TYPE_UP 2
+#define ACCESS_TYPE_CUR 0
+#define ACCESS_TYPE_NEXT 1
+#define ACCESS_TYPE_PREV 2
+#define ACCESS_TYPE_OFF 3
+
 struct image_option {
 	int orient;
 	int aspect;
 	enum {
 		FILL_DISABLE,
 		FILL_IN_SIZE,
-		FILL_OVER_SIZE
+		FILL_OVER_SIZE,
+		FILL_FIT_SIZE
 	} fill;
 
 	struct shadow {
@@ -105,6 +117,8 @@ static struct {
 
 	Eina_List *handle_list;
 	int premultiplied;
+	Ecore_Evas *(*alloc_canvas)(int w, int h, void *(*a)(void *data, int size), void (*f)(void *data, void *ptr), void *data);
+	Ecore_Evas *(*alloc_canvas_with_stride)(int w, int h, void *(*a)(void *data, int size, int *stride, int *bpp), void (*f)(void *data, void *ptr), void *data);
 } s_info = {
 	.font_name = NULL,
 	.font_size = -100,
@@ -112,6 +126,8 @@ static struct {
 	.handle_list = NULL,
 	.access_on = 0,
 	.premultiplied = 1,
+	.alloc_canvas = NULL,
+	.alloc_canvas_with_stride = NULL,
 };
 
 static inline Evas_Object *find_edje(struct info *handle, const char *id)
@@ -160,7 +176,7 @@ PUBLIC int script_update_color(void *h, const char *id, const char *part, const 
 
 	edje = find_edje(handle, id);
 	if (!edje) {
-		return LB_STATUS_ERROR_NOT_EXIST;
+		return DBOX_STATUS_ERROR_NOT_EXIST;
 	}
 
 	ret = sscanf(rgba, "%d %d %d %d %d %d %d %d %d %d %d %d",
@@ -169,7 +185,7 @@ PUBLIC int script_update_color(void *h, const char *id, const char *part, const 
 					r + 2, g + 2, b + 2, a + 2);	/* SHADOW */
 	if (ret != 12) {
 		DbgPrint("id[%s] part[%s] rgba[%s]\n", id, part, rgba);
-		return LB_STATUS_ERROR_INVALID;
+		return DBOX_STATUS_ERROR_INVALID_PARAMETER;
 	}
 
 	ret = edje_object_color_class_set(elm_layout_edje_get(edje), part,
@@ -178,10 +194,9 @@ PUBLIC int script_update_color(void *h, const char *id, const char *part, const 
 				r[2], g[2], b[2], a[2]); /* SHADOW */
 
 	DbgPrint("EDJE[%s] color class is %s changed", id, ret == EINA_TRUE ? "successfully" : "not");
-	return LB_STATUS_SUCCESS;
+	return DBOX_STATUS_ERROR_NONE;
 }
 
-#if defined(ENABLE_ACCESSIBILITY)
 static void activate_cb(void *data, Evas_Object *part_obj, Elm_Object_Item *item)
 {
 	Evas *e;
@@ -225,30 +240,27 @@ static void update_focus_chain(struct info *handle, Evas_Object *ao)
 		elm_object_focus_custom_chain_append(handle->parent, ao, NULL);
 	}
 }
-#endif
 
 PUBLIC int script_update_text(void *h, const char *id, const char *part, const char *text)
 {
 	struct obj_info *obj_info;
 	struct info *handle = h;
 	Evas_Object *edje;
+	Evas_Object *edje_part;
 
 	edje = find_edje(handle, id);
 	if (!edje) {
 		ErrPrint("Failed to find EDJE\n");
-		return LB_STATUS_ERROR_NOT_EXIST;
+		return DBOX_STATUS_ERROR_NOT_EXIST;
 	}
 
 	obj_info = evas_object_data_get(edje, "obj_info");
 	if (!obj_info) {
 		ErrPrint("Object info is not available\n");
-		return LB_STATUS_ERROR_FAULT;
+		return DBOX_STATUS_ERROR_FAULT;
 	}
 
 	elm_object_part_text_set(edje, part, text ? text : "");
-
-#if defined(ENABLE_ACCESSIBILITY)
-	Evas_Object *edje_part;
 
 	edje_part = (Evas_Object *)edje_object_part_object_get(elm_layout_edje_get(edje), part);
 	if (edje_part) {
@@ -303,8 +315,7 @@ PUBLIC int script_update_text(void *h, const char *id, const char *part, const c
 	}
 
 out:
-#endif
-	return LB_STATUS_SUCCESS;
+	return DBOX_STATUS_ERROR_NONE;
 }
 
 static void parse_aspect(struct image_option *img_opt, const char *value, int len)
@@ -394,6 +405,8 @@ static void parse_fill(struct image_option *img_opt, const char *value, int len)
 		img_opt->fill = FILL_IN_SIZE;
 	} else if (!strncasecmp(value, "over-size", len)) {
 		img_opt->fill = FILL_OVER_SIZE;
+	} else if (!strncasecmp(value, "fit-size", len)) {
+		img_opt->fill = FILL_FIT_SIZE;
 	} else {
 		img_opt->fill = FILL_DISABLE;
 	}
@@ -535,21 +548,19 @@ PUBLIC int script_update_access(void *_h, const char *id, const char *part, cons
 	struct info *handle = _h;
 	Evas_Object *edje;
 	struct obj_info *obj_info;
+	Evas_Object *edje_part;
 
 	edje = find_edje(handle, id);
 	if (!edje) {
 		ErrPrint("No such object: %s\n", id);
-		return LB_STATUS_ERROR_NOT_EXIST;
+		return DBOX_STATUS_ERROR_NOT_EXIST;
 	}
 
 	obj_info = evas_object_data_get(edje, "obj_info");
 	if (!obj_info) {
 		ErrPrint("Object info is not available\n");
-		return LB_STATUS_ERROR_FAULT;
+		return DBOX_STATUS_ERROR_FAULT;
 	}
-
-#if defined(ENABLE_ACCESSIBILITY)
-	Evas_Object *edje_part;
 
 	edje_part = (Evas_Object *)edje_object_part_object_get(elm_layout_edje_get(edje), part);
 	if (edje_part) {
@@ -585,14 +596,12 @@ PUBLIC int script_update_access(void *_h, const char *id, const char *part, cons
 	} else {
 		ErrPrint("[%s] is not exists\n", part);
 	}
-#endif
 
-	return LB_STATUS_SUCCESS;
+	return DBOX_STATUS_ERROR_NONE;
 }
 
 PUBLIC int script_operate_access(void *_h, const char *id, const char *part, const char *operation, const char *option)
 {
-#if defined(ENABLE_ACCESSIBILITY)
 	struct info *handle = _h;
 	Evas_Object *edje;
 	struct obj_info *obj_info;
@@ -600,19 +609,19 @@ PUBLIC int script_operate_access(void *_h, const char *id, const char *part, con
 	int ret;
 
 	if (!operation || !strlen(operation)) {
-		return LB_STATUS_ERROR_INVALID;
+		return DBOX_STATUS_ERROR_INVALID_PARAMETER;
 	}
 
 	edje = find_edje(handle, id);
 	if (!edje) {
 		ErrPrint("No such object: %s\n", id);
-		return LB_STATUS_ERROR_NOT_EXIST;
+		return DBOX_STATUS_ERROR_NOT_EXIST;
 	}
 
 	obj_info = evas_object_data_get(edje, "obj_info");
 	if (!obj_info) {
 		ErrPrint("Object info is not available\n");
-		return LB_STATUS_ERROR_FAULT;
+		return DBOX_STATUS_ERROR_FAULT;
 	}
 
 	memset(&action_info, 0, sizeof(action_info));
@@ -671,15 +680,11 @@ PUBLIC int script_operate_access(void *_h, const char *id, const char *part, con
 	}
 
 out:
-	return LB_STATUS_SUCCESS;
-#else
-	return LB_STATUS_ERROR_NOT_IMPLEMENTED;
-#endif
+	return DBOX_STATUS_ERROR_NONE;
 }
 
 static inline void apply_shadow_effect(struct image_option *img_opt, Evas_Object *img)
 {
-#if defined(WEARABLE)
 	ea_effect_h *ea_effect;
 
 	if (!img_opt->shadow.enabled) {
@@ -696,10 +701,89 @@ static inline void apply_shadow_effect(struct image_option *img_opt, Evas_Object
 	ea_object_image_effect_set(img, ea_effect);
 
 	ea_image_effect_destroy(ea_effect);
-#else
-	// Only supported from the wearable profile
-	return;
-#endif
+}
+
+static Evas_Object *crop_image(Evas_Object *img, const char *path, int part_w, int part_h, int w, int h, struct image_option *img_opt)
+{
+	Ecore_Evas *ee;
+	Evas *e;
+	Evas_Object *src_img;
+	Evas_Coord rw, rh;
+	const void *data;
+	Evas_Load_Error err;
+	Evas_Object *_img;
+
+	ee = ecore_evas_buffer_new(part_w, part_h);
+	if (!ee) {
+		ErrPrint("Failed to create a EE\n");
+		return img;
+	}
+
+	ecore_evas_alpha_set(ee, EINA_TRUE);
+
+	e = ecore_evas_get(ee);
+	if (!e) {
+		ErrPrint("Unable to get Evas\n");
+		ecore_evas_free(ee);
+		return img;
+	}
+
+	src_img = evas_object_image_filled_add(e);
+	if (!src_img) {
+		ErrPrint("Unable to add an image\n");
+		ecore_evas_free(ee);
+		return img;
+	}
+
+	evas_object_image_alpha_set(src_img, EINA_TRUE);
+	evas_object_image_colorspace_set(src_img, EVAS_COLORSPACE_ARGB8888);
+	evas_object_image_smooth_scale_set(src_img, EINA_TRUE);
+	evas_object_image_load_orientation_set(src_img, img_opt->orient);
+	evas_object_image_file_set(src_img, path, NULL);
+	err = evas_object_image_load_error_get(src_img);
+	if (err != EVAS_LOAD_ERROR_NONE) {
+		ErrPrint("Load error: %s\n", evas_load_error_str(err));
+		evas_object_del(src_img);
+		ecore_evas_free(ee);
+		return img;
+	}
+	evas_object_image_size_get(src_img, &rw, &rh);
+	evas_object_image_fill_set(src_img, 0, 0, rw, rh);
+	evas_object_resize(src_img, w, h);
+	evas_object_move(src_img, -(w - part_w) / 2, -(h - part_h) / 2);
+	evas_object_show(src_img);
+
+	data = ecore_evas_buffer_pixels_get(ee);
+	if (!data) {
+		ErrPrint("Unable to get pixels\n");
+		evas_object_del(src_img);
+		ecore_evas_free(ee);
+		return img;
+	}
+
+	e = evas_object_evas_get(img);
+	_img = evas_object_image_filled_add(e);
+	if (!_img) {
+		evas_object_del(src_img);
+		ecore_evas_free(ee);
+		return img;
+	}
+
+	evas_object_image_colorspace_set(_img, EVAS_COLORSPACE_ARGB8888);
+	evas_object_image_smooth_scale_set(_img, EINA_TRUE);
+	evas_object_image_alpha_set(_img, EINA_TRUE);
+	evas_object_image_data_set(_img, NULL);
+	evas_object_image_size_set(_img, part_w, part_h);
+	evas_object_resize(_img, part_w, part_h);
+	evas_object_image_data_copy_set(_img, (void *)data);
+	evas_object_image_fill_set(_img, 0, 0, part_w, part_h);
+	evas_object_image_data_update_add(_img, 0, 0, part_w, part_h);
+
+	evas_object_del(src_img);
+	ecore_evas_free(ee);
+
+	evas_object_del(img);
+	return _img;
 }
 
 PUBLIC int script_update_image(void *_h, const char *id, const char *part, const char *path, const char *option)
@@ -724,13 +808,13 @@ PUBLIC int script_update_image(void *_h, const char *id, const char *part, const
 	edje = find_edje(handle, id);
 	if (!edje) {
 		ErrPrint("No such object: %s\n", id);
-		return LB_STATUS_ERROR_NOT_EXIST;
+		return DBOX_STATUS_ERROR_NOT_EXIST;
 	}
 
 	obj_info = evas_object_data_get(edje, "obj_info");
 	if (!obj_info) {
 		ErrPrint("Object info is not available\n");
-		return LB_STATUS_ERROR_FAULT;
+		return DBOX_STATUS_ERROR_FAULT;
 	}
 
 	img = elm_object_part_content_unset(edje, part);
@@ -741,13 +825,13 @@ PUBLIC int script_update_image(void *_h, const char *id, const char *part, const
 
 	if (!path || !strlen(path) || access(path, R_OK) != 0) {
 		DbgPrint("SKIP - Path: [%s]\n", path);
-		return LB_STATUS_SUCCESS;
+		return DBOX_STATUS_ERROR_NONE;
 	}
 
 	img = evas_object_image_add(handle->e);
 	if (!img) {
 		ErrPrint("Failed to add an image object\n");
-		return LB_STATUS_ERROR_FAULT;
+		return DBOX_STATUS_ERROR_FAULT;
 	}
 
 	evas_object_image_preload(img, EINA_FALSE);
@@ -759,7 +843,7 @@ PUBLIC int script_update_image(void *_h, const char *id, const char *part, const
 	if (err != EVAS_LOAD_ERROR_NONE) {
 		ErrPrint("Load error: %s\n", evas_load_error_str(err));
 		evas_object_del(img);
-		return LB_STATUS_ERROR_IO;
+		return DBOX_STATUS_ERROR_IO_ERROR;
 	}
 
 	apply_shadow_effect(&img_opt, img);
@@ -798,100 +882,10 @@ PUBLIC int script_update_image(void *_h, const char *id, const char *part, const
 
 			if (!part_w || !part_h || !w || !h) {
 				evas_object_del(img);
-				return LB_STATUS_ERROR_INVALID;
+				return DBOX_STATUS_ERROR_INVALID_PARAMETER;
 			}
 
-			if (evas_object_image_region_support_get(img)) {
-				evas_object_image_load_region_set(img, (w - part_w) / 2, (h - part_h) / 2, part_w, part_h);
-				evas_object_image_load_size_set(img, part_w, part_h);
-				evas_object_image_filled_set(img, EINA_TRUE);
-				//evas_object_image_fill_set(img, 0, 0, part_w, part_h);
-				DbgPrint("Size: %dx%d (region: %dx%d - %dx%d)\n", w, h, (w - part_w) / 2, (h - part_h) / 2, part_w, part_h);
-			} else {
-				Ecore_Evas *ee;
-				Evas *e;
-				Evas_Object *src_img;
-				Evas_Coord rw, rh;
-				const void *data;
-
-				DbgPrint("Part loading is not supported\n");
-				ee = ecore_evas_buffer_new(part_w, part_h);
-				if (!ee) {
-					ErrPrint("Failed to create a EE\n");
-					evas_object_del(img);
-					return LB_STATUS_ERROR_FAULT;
-				}
-
-				ecore_evas_alpha_set(ee, EINA_TRUE);
-
-				e = ecore_evas_get(ee);
-				if (!e) {
-					ErrPrint("Unable to get Evas\n");
-					ecore_evas_free(ee);
-					evas_object_del(img);
-					return LB_STATUS_ERROR_FAULT;
-				}
-
-				src_img = evas_object_image_filled_add(e);
-				if (!src_img) {
-					ErrPrint("Unable to add an image\n");
-					ecore_evas_free(ee);
-					evas_object_del(img);
-					return LB_STATUS_ERROR_FAULT;
-				}
-
-				evas_object_image_alpha_set(src_img, EINA_TRUE);
-				evas_object_image_colorspace_set(src_img, EVAS_COLORSPACE_ARGB8888);
-        			evas_object_image_smooth_scale_set(src_img, EINA_TRUE);
-				evas_object_image_load_orientation_set(src_img, img_opt.orient);
-				evas_object_image_file_set(src_img, path, NULL);
-				err = evas_object_image_load_error_get(src_img);
-				if (err != EVAS_LOAD_ERROR_NONE) {
-					ErrPrint("Load error: %s\n", evas_load_error_str(err));
-					evas_object_del(src_img);
-					ecore_evas_free(ee);
-					evas_object_del(img);
-					return LB_STATUS_ERROR_IO;
-				}
-				evas_object_image_size_get(src_img, &rw, &rh);
-				evas_object_image_fill_set(src_img, 0, 0, rw, rh);
-				evas_object_resize(src_img, w, h);
-				evas_object_move(src_img, -(w - part_w) / 2, -(h - part_h) / 2);
-				evas_object_show(src_img);
-
-				data = ecore_evas_buffer_pixels_get(ee);
-				if (!data) {
-					ErrPrint("Unable to get pixels\n");
-					evas_object_del(src_img);
-					ecore_evas_free(ee);
-					evas_object_del(img);
-					return LB_STATUS_ERROR_IO;
-				}
-
-				e = evas_object_evas_get(img);
-				evas_object_del(img);
-				img = evas_object_image_filled_add(e);
-				if (!img) {
-					evas_object_del(src_img);
-					ecore_evas_free(ee);
-					return LB_STATUS_ERROR_MEMORY;
-				}
-
-				evas_object_image_colorspace_set(img, EVAS_COLORSPACE_ARGB8888);
-        			evas_object_image_smooth_scale_set(img, EINA_TRUE);
-				evas_object_image_alpha_set(img, EINA_TRUE);
-				evas_object_image_data_set(img, NULL);
-				evas_object_image_size_set(img, part_w, part_h);
-				evas_object_resize(img, part_w, part_h);
-				evas_object_image_data_copy_set(img, (void *)data);
-				evas_object_image_fill_set(img, 0, 0, part_w, part_h);
-				evas_object_image_data_update_add(img, 0, 0, part_w, part_h);
-
-				evas_object_del(src_img);
-				ecore_evas_free(ee);
-
-				apply_shadow_effect(&img_opt, img);
-			}
+			img = crop_image(img, path, part_w, part_h, w, h, &img_opt);
 		} else if (img_opt.fill == FILL_IN_SIZE) {
 			Evas_Coord part_w;
 			Evas_Coord part_h;
@@ -906,7 +900,7 @@ PUBLIC int script_update_image(void *_h, const char *id, const char *part, const
 			}
 			DbgPrint("Original %dx%d (part: %dx%d)\n", w, h, part_w, part_h);
 
-			if (part_w > w || part_h > h) {
+			if (w > part_w || h > part_h) {
 				double fw;
 				double fh;
 
@@ -914,22 +908,60 @@ PUBLIC int script_update_image(void *_h, const char *id, const char *part, const
 				fh = (double)part_h / (double)h;
 
 				if (fw > fh) {
-					w = part_w;
-					h = (double)h * fw;
-				} else {
 					h = part_h;
 					w = (double)w * fh;
+				} else {
+					w = part_w;
+					h = (double)h * fw;
 				}
 			}
-			DbgPrint("Size: %dx%d\n", w, h);
-			evas_object_image_fill_set(img, 0, 0, part_w, part_h);
-			evas_object_size_hint_fill_set(img, EVAS_HINT_FILL, EVAS_HINT_FILL);
-			evas_object_size_hint_weight_set(img, EVAS_HINT_EXPAND, EVAS_HINT_EXPAND);
+
+			if (!part_w || !part_h || !w || !h) {
+				evas_object_del(img);
+				return DBOX_STATUS_ERROR_INVALID_PARAMETER;
+			}
+
+			img = crop_image(img, path, part_w, part_h, w, h, &img_opt);
+		} else if (img_opt.fill == FILL_FIT_SIZE) {
+			Evas_Coord part_w;
+			Evas_Coord part_h;
+			double fw;
+			double fh;
+
+			if (img_opt.width >= 0 && img_opt.height >= 0) {
+				part_w = img_opt.width * elm_config_scale_get();
+				part_h = img_opt.height * elm_config_scale_get();
+			} else {
+				part_w = 0;
+				part_h = 0;
+				edje_object_part_geometry_get(elm_layout_edje_get(edje), part, NULL, NULL, &part_w, &part_h);
+			}
+			DbgPrint("Original %dx%d (part: %dx%d)\n", w, h, part_w, part_h);
+
+			fw = (double)part_w / (double)w;
+			fh = (double)part_h / (double)h;
+
+			if (fw < fh) {
+				h = part_h;
+				w = (double)w * fh;
+			} else {
+				w = part_w;
+				h = (double)h * fw;
+			}
+
+			if (!part_w || !part_h || !w || !h) {
+				evas_object_del(img);
+				return DBOX_STATUS_ERROR_INVALID_PARAMETER;
+			}
+
+			img = crop_image(img, path, part_w, part_h, w, h, &img_opt);
 		} else {
 			evas_object_image_fill_set(img, 0, 0, w, h);
 			evas_object_size_hint_fill_set(img, EVAS_HINT_FILL, EVAS_HINT_FILL);
 			evas_object_size_hint_aspect_set(img, EVAS_ASPECT_CONTROL_BOTH, w, h);
 		}
+
+		apply_shadow_effect(&img_opt, img);
 	} else {
 		if (img_opt.width >= 0 && img_opt.height >= 0) {
 			w = img_opt.width;
@@ -956,7 +988,7 @@ PUBLIC int script_update_image(void *_h, const char *id, const char *part, const
 	 * This object is not registered as an access object.
 	 * So the developer should add it to access list manually, using DESC_ACCESS block.
 	 */
-	return LB_STATUS_SUCCESS;
+	return DBOX_STATUS_ERROR_NONE;
 }
 
 static void script_signal_cb(void *data, Evas_Object *obj, const char *emission, const char *source)
@@ -1059,7 +1091,6 @@ static void edje_del_cb(void *_info, Evas *e, Evas_Object *obj, void *event_info
 	}
 }
 
-#if defined(ENABLE_ACCESSIBILITY)
 static inline Evas_Object *get_highlighted_object(Evas_Object *obj)
 {
 	Evas_Object *o, *ho;
@@ -1072,43 +1103,41 @@ static inline Evas_Object *get_highlighted_object(Evas_Object *obj)
 	ho = evas_object_data_get(o, "_elm_access_target");
 	return ho;
 }
-#endif
 
 /*!
-	LB_ACCESS_HIGHLIGHT		0
-	LB_ACCESS_HIGHLIGHT_NEXT	1
-	LB_ACCESS_HIGHLIGHT_PREV	2
-	LB_ACCESS_ACTIVATE		3
-	LB_ACCESS_ACTION		4
-	LB_ACCESS_SCROLL		5
+	DBOX_ACCESS_HIGHLIGHT		0
+	DBOX_ACCESS_HIGHLIGHT_NEXT	1
+	DBOX_ACCESS_HIGHLIGHT_PREV	2
+	DBOX_ACCESS_ACTIVATE		3
+	DBOX_ACCESS_ACTION		4
+	DBOX_ACCESS_SCROLL		5
 */
-PUBLIC int script_feed_event(void *h, int event_type, int x, int y, int down, unsigned int keycode, double timestamp)
+PUBLIC int script_feed_event(void *h, int event_type, int x, int y, int type, unsigned int keycode, double timestamp)
 {
 	struct info *handle = h;
 	Evas_Object *edje;
 	struct obj_info *obj_info;
-	int ret = LB_STATUS_SUCCESS;
+	int ret = DBOX_STATUS_ERROR_NONE;
 
 	edje = find_edje(handle, NULL); /*!< Get the base layout */
 	if (!edje) {
 		ErrPrint("Base layout is not exist\n");
-		return LB_STATUS_ERROR_NOT_EXIST;
+		return DBOX_STATUS_ERROR_NOT_EXIST;
 	}
 
 	obj_info = evas_object_data_get(edje, "obj_info");
 	if (!obj_info) {
 		ErrPrint("Object info is not valid\n");
-		return LB_STATUS_ERROR_INVALID;
+		return DBOX_STATUS_ERROR_INVALID_PARAMETER;
 	}
 
-#if defined(ENABLE_ACCESSIBILITY)
-	if (event_type & LB_SCRIPT_ACCESS_EVENT) {
+	if (event_type & DBOX_SCRIPT_ACCESS_EVENT) {
 		Elm_Access_Action_Info info;
 		Elm_Access_Action_Type action;
 
 		memset(&info, 0, sizeof(info));
 
-		if ((event_type & LB_SCRIPT_ACCESS_HIGHLIGHT) == LB_SCRIPT_ACCESS_HIGHLIGHT) {
+		if ((event_type & DBOX_SCRIPT_ACCESS_HIGHLIGHT) == DBOX_SCRIPT_ACCESS_HIGHLIGHT) {
 			action = ELM_ACCESS_ACTION_HIGHLIGHT;
 			info.x = x;
 			info.y = y;
@@ -1117,87 +1146,138 @@ PUBLIC int script_feed_event(void *h, int event_type, int x, int y, int down, un
 			if (ret == EINA_TRUE) {
 				if (!get_highlighted_object(edje)) {
 					ErrPrint("Highlighted object is not found\n");
-					ret = LB_ACCESS_STATUS_ERROR;
+					ret = DBOX_ACCESS_STATUS_ERROR;
 				} else {
 					DbgPrint("Highlighted object is found\n");
-					ret = LB_ACCESS_STATUS_DONE;
+					ret = DBOX_ACCESS_STATUS_DONE;
 				}
 			} else {
 				ErrPrint("Action error\n");
-				ret = LB_ACCESS_STATUS_ERROR;
+				ret = DBOX_ACCESS_STATUS_ERROR;
 			}
-		} else if ((event_type & LB_SCRIPT_ACCESS_HIGHLIGHT_NEXT) == LB_SCRIPT_ACCESS_HIGHLIGHT_NEXT) {
+		} else if ((event_type & DBOX_SCRIPT_ACCESS_HIGHLIGHT_NEXT) == DBOX_SCRIPT_ACCESS_HIGHLIGHT_NEXT) {
 			action = ELM_ACCESS_ACTION_HIGHLIGHT_NEXT;
 			info.highlight_cycle = EINA_FALSE;
 			ret = elm_access_action(edje, action, &info);
 			DbgPrint("ACCESS_HIGHLIGHT_NEXT, returns %d\n", ret);
-			ret = (ret == EINA_FALSE) ? LB_ACCESS_STATUS_LAST : LB_ACCESS_STATUS_DONE;
-		} else if ((event_type & LB_SCRIPT_ACCESS_HIGHLIGHT_PREV) == LB_SCRIPT_ACCESS_HIGHLIGHT_PREV) {
+			ret = (ret == EINA_FALSE) ? DBOX_ACCESS_STATUS_LAST : DBOX_ACCESS_STATUS_DONE;
+		} else if ((event_type & DBOX_SCRIPT_ACCESS_HIGHLIGHT_PREV) == DBOX_SCRIPT_ACCESS_HIGHLIGHT_PREV) {
 			action = ELM_ACCESS_ACTION_HIGHLIGHT_PREV;
 			info.highlight_cycle = EINA_FALSE;
 			ret = elm_access_action(edje, action, &info);
 			DbgPrint("ACCESS_HIGHLIGHT_PREV, returns %d\n", ret);
-			ret = (ret == EINA_FALSE) ? LB_ACCESS_STATUS_FIRST : LB_ACCESS_STATUS_DONE;
-		} else if ((event_type & LB_SCRIPT_ACCESS_ACTIVATE) == LB_SCRIPT_ACCESS_ACTIVATE) {
+			ret = (ret == EINA_FALSE) ? DBOX_ACCESS_STATUS_FIRST : DBOX_ACCESS_STATUS_DONE;
+		} else if ((event_type & DBOX_SCRIPT_ACCESS_ACTIVATE) == DBOX_SCRIPT_ACCESS_ACTIVATE) {
 			action = ELM_ACCESS_ACTION_ACTIVATE;
 			ret = elm_access_action(edje, action, &info);
 			DbgPrint("ACCESS_ACTIVATE, returns %d\n", ret);
-			ret = (ret == EINA_FALSE) ? LB_ACCESS_STATUS_ERROR : LB_ACCESS_STATUS_DONE;
-		} else if ((event_type & LB_SCRIPT_ACCESS_ACTION) == LB_SCRIPT_ACCESS_ACTION) {
-			if (down == 0) {
+			ret = (ret == EINA_FALSE) ? DBOX_ACCESS_STATUS_ERROR : DBOX_ACCESS_STATUS_DONE;
+		} else if ((event_type & DBOX_SCRIPT_ACCESS_ACTION) == DBOX_SCRIPT_ACCESS_ACTION) {
+			switch (type) {
+			case ACCESS_TYPE_UP:
 				action = ELM_ACCESS_ACTION_UP;
 				ret = elm_access_action(edje, action, &info);
-				DbgPrint("ACCESS_ACTION(%d), returns %d\n", down, ret);
-				ret = (ret == EINA_FALSE) ? LB_ACCESS_STATUS_ERROR : LB_ACCESS_STATUS_DONE;
-			} else if (down == 1) {
+				DbgPrint("ACCESS_ACTION(%d), returns %d\n", type, ret);
+				ret = (ret == EINA_FALSE) ? DBOX_ACCESS_STATUS_ERROR : DBOX_ACCESS_STATUS_DONE;
+				break;
+			case ACCESS_TYPE_DOWN:
 				action = ELM_ACCESS_ACTION_DOWN;
 				ret = elm_access_action(edje, action, &info);
-				DbgPrint("ACCESS_ACTION(%d), returns %d\n", down, ret);
-				ret = (ret == EINA_FALSE) ? LB_ACCESS_STATUS_ERROR : LB_ACCESS_STATUS_DONE;
-			} else {
+				DbgPrint("ACCESS_ACTION(%d), returns %d\n", type, ret);
+				ret = (ret == EINA_FALSE) ? DBOX_ACCESS_STATUS_ERROR : DBOX_ACCESS_STATUS_DONE;
+				break;
+			default:
 				ErrPrint("Invalid access event\n");
-				ret = LB_ACCESS_STATUS_ERROR;
+				ret = DBOX_ACCESS_STATUS_ERROR;
+				break;
 			}
-		} else if ((event_type & LB_SCRIPT_ACCESS_SCROLL) == LB_SCRIPT_ACCESS_SCROLL) {
+		} else if ((event_type & DBOX_SCRIPT_ACCESS_SCROLL) == DBOX_SCRIPT_ACCESS_SCROLL) {
 			action = ELM_ACCESS_ACTION_SCROLL;
 			info.x = x;
 			info.y = y;
-			switch (down) {
-			case 0:
+			switch (type) {
+			case ACCESS_TYPE_DOWN:
 				info.mouse_type = 0;
 				ret = elm_access_action(edje, action, &info);
 				DbgPrint("ACCESS_HIGHLIGHT_SCROLL, returns %d\n", ret);
-				ret = (ret == EINA_FALSE) ? LB_ACCESS_STATUS_ERROR : LB_ACCESS_STATUS_DONE;
+				ret = (ret == EINA_FALSE) ? DBOX_ACCESS_STATUS_ERROR : DBOX_ACCESS_STATUS_DONE;
 				break;
-			case -1:
+			case ACCESS_TYPE_MOVE:
 				info.mouse_type = 1;
 				ret = elm_access_action(edje, action, &info);
 				DbgPrint("ACCESS_HIGHLIGHT_SCROLL, returns %d\n", ret);
-				ret = (ret == EINA_FALSE) ? LB_ACCESS_STATUS_ERROR : LB_ACCESS_STATUS_DONE;
+				ret = (ret == EINA_FALSE) ? DBOX_ACCESS_STATUS_ERROR : DBOX_ACCESS_STATUS_DONE;
 				break;
-			case 1:
+			case ACCESS_TYPE_UP:
 				info.mouse_type = 2;
 				ret = elm_access_action(edje, action, &info);
 				DbgPrint("ACCESS_HIGHLIGHT_SCROLL, returns %d\n", ret);
-				ret = (ret == EINA_FALSE) ? LB_ACCESS_STATUS_ERROR : LB_ACCESS_STATUS_DONE;
+				ret = (ret == EINA_FALSE) ? DBOX_ACCESS_STATUS_ERROR : DBOX_ACCESS_STATUS_DONE;
 				break;
 			default:
-				ret = LB_ACCESS_STATUS_ERROR;
+				ret = DBOX_ACCESS_STATUS_ERROR;
 				break;
 			}
-		} else if ((event_type & LB_SCRIPT_ACCESS_UNHIGHLIGHT) == LB_SCRIPT_ACCESS_UNHIGHLIGHT) {
+		} else if ((event_type & DBOX_SCRIPT_ACCESS_UNHIGHLIGHT) == DBOX_SCRIPT_ACCESS_UNHIGHLIGHT) {
 			action = ELM_ACCESS_ACTION_UNHIGHLIGHT;
 			ret = elm_access_action(edje, action, &info);
 			DbgPrint("ACCESS_UNHIGHLIGHT, returns %d\n", ret);
-			ret = (ret == EINA_FALSE) ? LB_ACCESS_STATUS_ERROR : LB_ACCESS_STATUS_DONE;
+			ret = (ret == EINA_FALSE) ? DBOX_ACCESS_STATUS_ERROR : DBOX_ACCESS_STATUS_DONE;
+		} else if ((event_type & DBOX_SCRIPT_ACCESS_VALUE_CHANGE) == DBOX_SCRIPT_ACCESS_VALUE_CHANGE) {
+			action = ELM_ACCESS_ACTION_VALUE_CHANGE;
+			info.mouse_type = type;
+			info.x = x;
+			info.y = y;
+			ret = elm_access_action(edje, action, &info);
+			ret = (ret == EINA_FALSE) ? DBOX_ACCESS_STATUS_ERROR : DBOX_ACCESS_STATUS_DONE;
+		} else if ((event_type & DBOX_SCRIPT_ACCESS_MOUSE) == DBOX_SCRIPT_ACCESS_MOUSE) {
+			action = ELM_ACCESS_ACTION_MOUSE;
+			info.mouse_type = type;
+			info.x = x;
+			info.y = y;
+			ret = elm_access_action(edje, action, &info);
+			ret = (ret == EINA_FALSE) ? DBOX_ACCESS_STATUS_ERROR : DBOX_ACCESS_STATUS_DONE;
+		} else if ((event_type & DBOX_SCRIPT_ACCESS_BACK) == DBOX_SCRIPT_ACCESS_BACK) {
+			action = ELM_ACCESS_ACTION_BACK;
+			info.mouse_type = type;
+			info.x = x;
+			info.y = y;
+			ret = elm_access_action(edje, action, &info);
+			ret = (ret == EINA_FALSE) ? DBOX_ACCESS_STATUS_ERROR : DBOX_ACCESS_STATUS_DONE;
+		} else if ((event_type & DBOX_SCRIPT_ACCESS_OVER) == DBOX_SCRIPT_ACCESS_OVER) {
+			action = ELM_ACCESS_ACTION_OVER;
+			info.mouse_type = type;
+			info.x = x;
+			info.y = y;
+			ret = elm_access_action(edje, action, &info);
+			ret = (ret == EINA_FALSE) ? DBOX_ACCESS_STATUS_ERROR : DBOX_ACCESS_STATUS_DONE;
+		} else if ((event_type & DBOX_SCRIPT_ACCESS_READ) == DBOX_SCRIPT_ACCESS_READ) {
+			action = ELM_ACCESS_ACTION_READ;
+			info.mouse_type = type;
+			info.x = x;
+			info.y = y;
+			ret = elm_access_action(edje, action, &info);
+			ret = (ret == EINA_FALSE) ? DBOX_ACCESS_STATUS_ERROR : DBOX_ACCESS_STATUS_DONE;
+		} else if ((event_type & DBOX_SCRIPT_ACCESS_ENABLE) == DBOX_SCRIPT_ACCESS_ENABLE) {
+			action = ELM_ACCESS_ACTION_ENABLE;
+			info.mouse_type = type;
+			info.x = x;
+			info.y = y;
+			ret = elm_access_action(edje, action, &info);
+			ret = (ret == EINA_FALSE) ? DBOX_ACCESS_STATUS_ERROR : DBOX_ACCESS_STATUS_DONE;
+		} else if ((event_type & DBOX_SCRIPT_ACCESS_DISABLE) == DBOX_SCRIPT_ACCESS_DISABLE) {
+			action = ELM_ACCESS_ACTION_ENABLE;
+			info.mouse_type = type;
+			info.x = x;
+			info.y = y;
+			ret = elm_access_action(edje, action, &info);
+			ret = (ret == EINA_FALSE) ? DBOX_ACCESS_STATUS_ERROR : DBOX_ACCESS_STATUS_DONE;
 		} else {
 			DbgPrint("Invalid event\n");
-			ret = LB_ACCESS_STATUS_ERROR;
+			ret = DBOX_ACCESS_STATUS_ERROR;
 		}
 
-	} else 
-#endif
-	if (event_type & LB_SCRIPT_MOUSE_EVENT) {
+	} else if (event_type & DBOX_SCRIPT_MOUSE_EVENT) {
 		double cur_timestamp;
 		unsigned int flags;
 
@@ -1214,71 +1294,71 @@ PUBLIC int script_feed_event(void *h, int event_type, int x, int y, int down, un
 #endif
 		if (cur_timestamp - timestamp > 0.1f && handle->is_mouse_down == 0) {
 			DbgPrint("Discard lazy event : %lf\n", cur_timestamp - timestamp);
-			return LB_STATUS_SUCCESS;
+			return DBOX_STATUS_ERROR_NONE;
 		}
 
 		switch (event_type) {
-		case LB_SCRIPT_MOUSE_DOWN:
+		case DBOX_SCRIPT_MOUSE_DOWN:
 			if (handle->is_mouse_down == 0) {
+				flags = evas_event_default_flags_get(handle->e);
+				flags &= ~EVAS_EVENT_FLAG_ON_SCROLL;
+				flags &= ~EVAS_EVENT_FLAG_ON_HOLD;
+				evas_event_default_flags_set(handle->e, flags);
+
 				evas_event_feed_mouse_move(handle->e, x, y, timestamp * 1000, NULL);
 				evas_event_feed_mouse_down(handle->e, 1, EVAS_BUTTON_NONE, (timestamp + 0.01f) * 1000, NULL);
 				handle->is_mouse_down = 1;
 			}
 			break;
-		case LB_SCRIPT_MOUSE_MOVE:
+		case DBOX_SCRIPT_MOUSE_MOVE:
 			evas_event_feed_mouse_move(handle->e, x, y, timestamp * 1000, NULL);
 			break;
-		case LB_SCRIPT_MOUSE_UP:
+		case DBOX_SCRIPT_MOUSE_UP:
 			if (handle->is_mouse_down == 1) {
 				evas_event_feed_mouse_move(handle->e, x, y, timestamp * 1000, NULL);
 				evas_event_feed_mouse_up(handle->e, 1, EVAS_BUTTON_NONE, (timestamp + 0.01f) * 1000, NULL);
 				handle->is_mouse_down = 0;
 			}
-
-			flags = evas_event_default_flags_get(handle->e);
-			flags &= ~EVAS_EVENT_FLAG_ON_SCROLL;
-			flags &= ~EVAS_EVENT_FLAG_ON_HOLD;
-			evas_event_default_flags_set(handle->e, flags);
 			break;
-		case LB_SCRIPT_MOUSE_IN:
+		case DBOX_SCRIPT_MOUSE_IN:
 			evas_event_feed_mouse_in(handle->e, timestamp * 1000, NULL);
 			break;
-		case LB_SCRIPT_MOUSE_OUT:
+		case DBOX_SCRIPT_MOUSE_OUT:
 			evas_event_feed_mouse_out(handle->e, timestamp * 1000, NULL);
 			break;
-		case LB_SCRIPT_MOUSE_ON_SCROLL:
+		case DBOX_SCRIPT_MOUSE_ON_SCROLL:
 			flags = evas_event_default_flags_get(handle->e);
 			flags |= EVAS_EVENT_FLAG_ON_SCROLL;
 			evas_event_default_flags_set(handle->e, flags);
 			break;
-		case LB_SCRIPT_MOUSE_ON_HOLD:	// To cancel the clicked, enable this
+		case DBOX_SCRIPT_MOUSE_ON_HOLD:	// To cancel the clicked, enable this
 			flags = evas_event_default_flags_get(handle->e);
 			flags |= EVAS_EVENT_FLAG_ON_HOLD;
 			evas_event_default_flags_set(handle->e, flags);
 			break;
-		case LB_SCRIPT_MOUSE_OFF_SCROLL:
+		case DBOX_SCRIPT_MOUSE_OFF_SCROLL:
 			flags = evas_event_default_flags_get(handle->e);
 			flags &= ~EVAS_EVENT_FLAG_ON_SCROLL;
 			evas_event_default_flags_set(handle->e, flags);
 			break;
-		case LB_SCRIPT_MOUSE_OFF_HOLD:
+		case DBOX_SCRIPT_MOUSE_OFF_HOLD:
 			flags = evas_event_default_flags_get(handle->e);
 			flags &= ~EVAS_EVENT_FLAG_ON_HOLD;
 			evas_event_default_flags_set(handle->e, flags);
 			break;
 		default:
-			return LB_STATUS_ERROR_INVALID;
+			return DBOX_STATUS_ERROR_INVALID_PARAMETER;
 		}
-	} else if (event_type & LB_SCRIPT_KEY_EVENT) {
+	} else if (event_type & DBOX_SCRIPT_KEY_EVENT) {
 		const char *keyname = "";
 		const char *key = "";
 		const char *string = "";
 		const char *compose = "";
 
 		switch (event_type) {
-		case LB_SCRIPT_KEY_DOWN:
+		case DBOX_SCRIPT_KEY_DOWN:
 			evas_event_feed_key_down(handle->e, keyname, key, string, compose, timestamp * 1000, NULL);
-			ret = LB_KEY_STATUS_DONE;
+			ret = DBOX_KEY_STATUS_DONE;
 			/*!
 			 * \TODO
 			 * If the keyname == RIGHT, Need to check that
@@ -1287,33 +1367,33 @@ PUBLIC int script_feed_event(void *h, int event_type, int x, int y, int down, un
 
 			/*!
 			 * if (REACH to the LAST) {
-			 *    ret = LB_KEY_STATUS_LAST;
+			 *    ret = DBOX_KEY_STATUS_LAST;
 			 * } else {
-			 *    ret = LB_KEY_STATUS_DONE;
+			 *    ret = DBOX_KEY_STATUS_DONE;
 			 * }
 			 *
 			 * if (REACH to the FIRST) {
-			 *    ret = LB_KEY_STATUS_FIRST;
+			 *    ret = DBOX_KEY_STATUS_FIRST;
 			 * } else {
-			 *    ret = LB_KEY_STATUS_DONE;
+			 *    ret = DBOX_KEY_STATUS_DONE;
 			 * }
 			 */
 			break;
-		case LB_SCRIPT_KEY_UP:
+		case DBOX_SCRIPT_KEY_UP:
 			evas_event_feed_key_up(handle->e, keyname, key, string, compose, timestamp * 1000, NULL);
-			ret = LB_KEY_STATUS_DONE;
+			ret = DBOX_KEY_STATUS_DONE;
 			break;
-		case LB_SCRIPT_KEY_FOCUS_IN:
+		case DBOX_SCRIPT_KEY_FOCUS_IN:
 			// evas_event_callback_call(handle->e, EVAS_CALLBACK_CANVAS_FOCUS_IN, NULL);
-			ret = LB_KEY_STATUS_DONE;
+			ret = DBOX_KEY_STATUS_DONE;
 			break;
-		case LB_SCRIPT_KEY_FOCUS_OUT:
+		case DBOX_SCRIPT_KEY_FOCUS_OUT:
 			// evas_event_callback_call(handle->e, EVAS_CALLBACK_CANVAS_FOCUS_OUT, NULL);
-			ret = LB_KEY_STATUS_DONE;
+			ret = DBOX_KEY_STATUS_DONE;
 			break;
 		default:
 			DbgPrint("Event is not implemented\n");
-			ret = LB_KEY_STATUS_ERROR;
+			ret = DBOX_KEY_STATUS_ERROR;
 			break;
 		}
 	}
@@ -1333,13 +1413,13 @@ PUBLIC int script_update_script(void *h, const char *src_id, const char *target_
 	edje = find_edje(handle, src_id);
 	if (!edje) {
 		ErrPrint("Edje is not exists (%s)\n", src_id);
-		return LB_STATUS_ERROR_NOT_EXIST;
+		return DBOX_STATUS_ERROR_NOT_EXIST;
 	}
 
 	obj_info = evas_object_data_get(edje, "obj_info");
 	if (!obj_info) {
 		ErrPrint("Object info is not valid\n");
-		return LB_STATUS_ERROR_INVALID;
+		return DBOX_STATUS_ERROR_INVALID_PARAMETER;
 	}
 
 	obj = elm_object_part_content_unset(edje, part);
@@ -1355,7 +1435,7 @@ PUBLIC int script_update_script(void *h, const char *src_id, const char *target_
 
 	if (!path || !strlen(path) || access(path, R_OK) != 0) {
 		DbgPrint("SKIP - Path: [%s]\n", path);
-		return LB_STATUS_SUCCESS;
+		return DBOX_STATUS_ERROR_NONE;
 	}
 
 	if (!target_id) {
@@ -1389,7 +1469,7 @@ PUBLIC int script_update_script(void *h, const char *src_id, const char *target_
 	obj = elm_layout_add(edje);
 	if (!obj) {
 		ErrPrint("Failed to add a new edje object\n");
-		return LB_STATUS_ERROR_FAULT;
+		return DBOX_STATUS_ERROR_FAULT;
 	}
 
 	edje_object_scale_set(elm_layout_edje_get(obj), elm_config_scale_get());
@@ -1401,7 +1481,7 @@ PUBLIC int script_update_script(void *h, const char *src_id, const char *target_
 			ErrPrint("Could not load %s from %s: %s\n", group, path, edje_load_error_str(err));
 		}
 		evas_object_del(obj);
-		return LB_STATUS_ERROR_IO;
+		return DBOX_STATUS_ERROR_IO_ERROR;
 	}
 
 	evas_object_show(obj);
@@ -1410,7 +1490,7 @@ PUBLIC int script_update_script(void *h, const char *src_id, const char *target_
 	if (!obj_info) {
 		ErrPrint("Failed to add a obj_info\n");
 		evas_object_del(obj);
-		return LB_STATUS_ERROR_MEMORY;
+		return DBOX_STATUS_ERROR_OUT_OF_MEMORY;
 	}
 
 	obj_info->id = strdup(target_id);
@@ -1418,7 +1498,7 @@ PUBLIC int script_update_script(void *h, const char *src_id, const char *target_
 		ErrPrint("Failed to add a obj_info\n");
 		free(obj_info);
 		evas_object_del(obj);
-		return LB_STATUS_ERROR_MEMORY;
+		return DBOX_STATUS_ERROR_OUT_OF_MEMORY;
 	}
 
 	obj_info->parent = edje;
@@ -1429,7 +1509,7 @@ PUBLIC int script_update_script(void *h, const char *src_id, const char *target_
 		free(obj_info->id);
 		free(obj_info);
 		evas_object_del(obj);
-		return LB_STATUS_ERROR_MEMORY;
+		return DBOX_STATUS_ERROR_OUT_OF_MEMORY;
 	}
 
 	child->part = strdup(part);
@@ -1439,7 +1519,7 @@ PUBLIC int script_update_script(void *h, const char *src_id, const char *target_
 		free(obj_info->id);
 		free(obj_info);
 		evas_object_del(obj);
-		return LB_STATUS_ERROR_MEMORY;
+		return DBOX_STATUS_ERROR_OUT_OF_MEMORY;
 	}
 
 	child->obj = obj;
@@ -1455,7 +1535,7 @@ PUBLIC int script_update_script(void *h, const char *src_id, const char *target_
 	obj_info = evas_object_data_get(edje, "obj_info");
 	obj_info->children = eina_list_append(obj_info->children, child);
 
-	return LB_STATUS_SUCCESS;
+	return DBOX_STATUS_ERROR_NONE;
 }
 
 PUBLIC int script_update_signal(void *h, const char *id, const char *part, const char *signal)
@@ -1465,11 +1545,11 @@ PUBLIC int script_update_signal(void *h, const char *id, const char *part, const
 
 	edje = find_edje(handle, id);
 	if (!edje) {
-		return LB_STATUS_ERROR_NOT_EXIST;
+		return DBOX_STATUS_ERROR_NOT_EXIST;
 	}
 
 	elm_object_signal_emit(edje, signal, part);
-	return LB_STATUS_SUCCESS;
+	return DBOX_STATUS_ERROR_NONE;
 }
 
 PUBLIC int script_update_drag(void *h, const char *id, const char *part, double x, double y)
@@ -1479,11 +1559,11 @@ PUBLIC int script_update_drag(void *h, const char *id, const char *part, double 
 
 	edje = find_edje(handle, id);
 	if (!edje) {
-		return LB_STATUS_ERROR_NOT_EXIST;
+		return DBOX_STATUS_ERROR_NOT_EXIST;
 	}
 
 	edje_object_part_drag_value_set(elm_layout_edje_get(edje), part, x, y);
-	return LB_STATUS_SUCCESS;
+	return DBOX_STATUS_ERROR_NONE;
 }
 
 PUBLIC int script_update_size(void *han, const char *id, int w, int h)
@@ -1493,7 +1573,7 @@ PUBLIC int script_update_size(void *han, const char *id, int w, int h)
 
 	edje = find_edje(handle, id);
 	if (!edje) {
-		return LB_STATUS_ERROR_NOT_EXIST;
+		return DBOX_STATUS_ERROR_NOT_EXIST;
 	}
 
 	if (!id) {
@@ -1506,7 +1586,7 @@ PUBLIC int script_update_size(void *han, const char *id, int w, int h)
 
 	DbgPrint("Resize object to %dx%d\n", w, h);
 	evas_object_resize(edje, w, h);
-	return LB_STATUS_SUCCESS;
+	return DBOX_STATUS_ERROR_NONE;
 }
 
 PUBLIC int script_update_category(void *h, const char *id, const char *category)
@@ -1519,16 +1599,16 @@ PUBLIC int script_update_category(void *h, const char *id, const char *category)
 	}
 
 	if (!category) {
-		return LB_STATUS_SUCCESS;
+		return DBOX_STATUS_ERROR_NONE;
 	}
 
 	handle->category = strdup(category);
 	if (!handle->category) {
 		ErrPrint("Error: %s\n", strerror(errno));
-		return LB_STATUS_ERROR_MEMORY;
+		return DBOX_STATUS_ERROR_OUT_OF_MEMORY;
 	}
 
-	return LB_STATUS_SUCCESS;
+	return DBOX_STATUS_ERROR_NONE;
 }
 
 PUBLIC void *script_create(void *buffer_handle, const char *file, const char *group)
@@ -1572,7 +1652,7 @@ PUBLIC int script_destroy(void *_handle)
 
 	if (!eina_list_data_find(s_info.handle_list, handle)) {
 		DbgPrint("Not found (already deleted?)\n");
-		return LB_STATUS_ERROR_NOT_EXIST;
+		return DBOX_STATUS_ERROR_NOT_EXIST;
 	}
 
 	s_info.handle_list = eina_list_remove(s_info.handle_list, handle);
@@ -1587,7 +1667,7 @@ PUBLIC int script_destroy(void *_handle)
 	free(handle->file);
 	free(handle->group);
 	free(handle);
-	return LB_STATUS_SUCCESS;
+	return DBOX_STATUS_ERROR_NONE;
 }
 
 static void sw_render_pre_cb(void *data, Evas *e, void *event_info)
@@ -1674,6 +1754,40 @@ static void *alloc_fb(void *data, int size)
 	return script_buffer_fb(handle->buffer_handle);
 }
 
+static void *alloc_with_stride_fb(void *data, int size, int *stride, int *bpp)
+{
+	void *canvas;
+	struct info *handle = data;
+	int _stride;
+	int _bpp;
+
+	canvas = alloc_fb(data, size);
+	if (!canvas) {
+		ErrPrint("Unable to allocate canvas buffer\n");
+	}
+
+	_bpp = script_buffer_pixels(handle->buffer_handle);
+	if (_bpp < 0) {
+		ErrPrint("Failed to get pixel size, fallback to 4\n");
+		_bpp = sizeof(int);
+	}
+
+	_stride = script_buffer_stride(handle->buffer_handle);
+	if (_stride < 0) {
+		int w = 0;
+
+		ecore_evas_geometry_get(handle->ee, NULL, NULL, &w, NULL);
+
+		_stride = w * _bpp;
+		ErrPrint("Failed to get stride info, fallback to %d\n", _stride);
+	}
+
+	*stride = _stride;
+	*bpp = _bpp << 3;
+
+	return canvas;
+}
+
 static void free_fb(void *data, void *ptr)
 {
 	struct info *handle = data;
@@ -1693,12 +1807,12 @@ static void free_fb(void *data, void *ptr)
 static int destroy_ecore_evas(struct info *handle)
 {
 	if (!handle->ee) {
-		return LB_STATUS_SUCCESS;
+		return DBOX_STATUS_ERROR_NONE;
 	}
 	ecore_evas_free(handle->ee);
 	handle->ee = NULL;
 	handle->e = NULL;
-	return LB_STATUS_SUCCESS;
+	return DBOX_STATUS_ERROR_NONE;
 }
 
 static int create_ecore_evas(struct info *handle, int *w, int *h)
@@ -1706,7 +1820,7 @@ static int create_ecore_evas(struct info *handle, int *w, int *h)
 	script_buffer_get_size(handle->buffer_handle, w, h);
 	if (*w == 0 && *h == 0) {
 		ErrPrint("ZERO size FB accessed\n");
-		return LB_STATUS_ERROR_INVALID;
+		return DBOX_STATUS_ERROR_INVALID_PARAMETER;
 	}
 
 	if (handle->ee) {
@@ -1719,13 +1833,21 @@ static int create_ecore_evas(struct info *handle, int *w, int *h)
 			ecore_evas_resize(handle->ee, *w, *h);
 		}
 
-		return LB_STATUS_SUCCESS;
+		return DBOX_STATUS_ERROR_NONE;
 	}
 
-	handle->ee = ecore_evas_buffer_allocfunc_new(*w, *h, alloc_fb, free_fb, handle);
+	if (!script_buffer_auto_align() && s_info.alloc_canvas_with_stride) {
+		handle->ee = s_info.alloc_canvas_with_stride(*w, *h, alloc_with_stride_fb, free_fb, handle);
+	} else if (s_info.alloc_canvas) {
+		handle->ee = s_info.alloc_canvas(*w, *h, alloc_fb, free_fb, handle);
+	} else {
+		ErrPrint("Failed to allocate canvas\n");
+		return DBOX_STATUS_ERROR_FAULT;
+	}
+
 	if (!handle->ee) {
 		ErrPrint("Failed to create a buffer\n");
-		return LB_STATUS_ERROR_FAULT;
+		return DBOX_STATUS_ERROR_FAULT;
 	}
 
 	handle->e = ecore_evas_get(handle->ee);
@@ -1733,7 +1855,7 @@ static int create_ecore_evas(struct info *handle, int *w, int *h)
 		ErrPrint("Failed to get an Evas\n");
 		ecore_evas_free(handle->ee);
 		handle->ee = NULL;
-		return LB_STATUS_ERROR_FAULT;
+		return DBOX_STATUS_ERROR_FAULT;
 	}
 
 	if (script_buffer_type(handle->buffer_handle) == BUFFER_TYPE_PIXMAP) {
@@ -1765,7 +1887,7 @@ static int create_ecore_evas(struct info *handle, int *w, int *h)
 	ecore_evas_show(handle->ee);
 	ecore_evas_activate(handle->ee);
 
-	return LB_STATUS_SUCCESS;
+	return DBOX_STATUS_ERROR_NONE;
 }
 
 PUBLIC int script_load(void *_handle, int (*render_pre)(void *buffer_handle, void *data), int (*render_post)(void *render_handle, void *data), void *data)
@@ -1797,7 +1919,7 @@ PUBLIC int script_load(void *_handle, int (*render_pre)(void *buffer_handle, voi
 	if (!obj_info) {
 		ErrPrint("Heap: %s\n", strerror(errno));
 		destroy_ecore_evas(handle);
-		return LB_STATUS_ERROR_MEMORY;
+		return DBOX_STATUS_ERROR_OUT_OF_MEMORY;
 	}
 
 	obj_info->parent = evas_object_rectangle_add(handle->e);
@@ -1805,7 +1927,7 @@ PUBLIC int script_load(void *_handle, int (*render_pre)(void *buffer_handle, voi
 		ErrPrint("Unable to create a parent box\n");
 		free(obj_info);
 		destroy_ecore_evas(handle);
-		return LB_STATUS_ERROR_FAULT;
+		return DBOX_STATUS_ERROR_FAULT;
 	}
 
 	edje = elm_layout_add(obj_info->parent);
@@ -1814,7 +1936,7 @@ PUBLIC int script_load(void *_handle, int (*render_pre)(void *buffer_handle, voi
 		evas_object_del(obj_info->parent);
 		free(obj_info);
 		destroy_ecore_evas(handle);
-		return LB_STATUS_ERROR_FAULT;
+		return DBOX_STATUS_ERROR_FAULT;
 	}
 
 	edje_object_scale_set(elm_layout_edje_get(edje), elm_config_scale_get());
@@ -1830,7 +1952,7 @@ PUBLIC int script_load(void *_handle, int (*render_pre)(void *buffer_handle, voi
 		evas_object_del(obj_info->parent);
 		free(obj_info);
 		destroy_ecore_evas(handle);
-		return LB_STATUS_ERROR_IO;
+		return DBOX_STATUS_ERROR_IO_ERROR;
 	}
 
 	handle->parent = edje;
@@ -1844,7 +1966,7 @@ PUBLIC int script_load(void *_handle, int (*render_pre)(void *buffer_handle, voi
 	evas_object_data_set(edje, "obj_info", obj_info);
 
 	handle->obj_list = eina_list_append(handle->obj_list, edje);
-	return LB_STATUS_SUCCESS;
+	return DBOX_STATUS_ERROR_NONE;
 }
 
 PUBLIC int script_unload(void *_handle)
@@ -1864,7 +1986,7 @@ PUBLIC int script_unload(void *_handle)
 	}
 
 	(void)destroy_ecore_evas(handle);
-	return LB_STATUS_SUCCESS;
+	return DBOX_STATUS_ERROR_NONE;
 }
 
 static void access_cb(keynode_t *node, void *user_data)
@@ -1895,9 +2017,7 @@ static void font_changed_cb(keynode_t *node, void *user_data)
 {
 	char *font_name;
 
-#if defined(WEARABLE)
 	evas_font_reinit();
-#endif
 
 	if (s_info.font_name) {
 		font_name = vconf_get_str("db/setting/accessibility/font_name");
@@ -2013,7 +2133,18 @@ PUBLIC int script_init(double scale, int premultiplied)
 	access_cb(NULL, NULL);
 	font_changed_cb(NULL, NULL);
 	font_size_cb(SYSTEM_SETTINGS_KEY_FONT_SIZE, NULL);
-	return LB_STATUS_SUCCESS;
+
+	s_info.alloc_canvas_with_stride = dlsym(RTLD_DEFAULT, "ecore_evas_buffer_allocfunc_with_stride_new");
+	if (!s_info.alloc_canvas_with_stride) {
+		DbgPrint("Fallback to allocfunc_new\n");
+	}
+
+	s_info.alloc_canvas = dlsym(RTLD_DEFAULT, "ecore_evas_buffer_allocfunc_new");
+	if (!s_info.alloc_canvas) {
+		ErrPrint("No way to allocate canvas\n");
+	}
+
+	return DBOX_STATUS_ERROR_NONE;
 }
 
 PUBLIC int script_fini(void)
@@ -2046,7 +2177,7 @@ PUBLIC int script_fini(void)
 
 	free(s_info.font_name);
 	s_info.font_name = NULL;
-	return LB_STATUS_SUCCESS;
+	return DBOX_STATUS_ERROR_NONE;
 }
 
 /* End of a file */

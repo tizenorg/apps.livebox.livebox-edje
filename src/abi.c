@@ -4,7 +4,7 @@
 #include <dlfcn.h>
 
 #include <dlog.h>
-#include <livebox-errno.h>
+#include <dynamicbox_errno.h>
 
 #include "debug.h"
 #include "abi.h"
@@ -16,7 +16,7 @@ int script_buffer_load(void *handle)
 		load = dlsym(RTLD_DEFAULT, "buffer_handler_load");
 		if (!load) {
 			ErrPrint("broken ABI: %s\n", dlerror());
-			return LB_STATUS_ERROR_NOT_IMPLEMENTED;
+			return DBOX_STATUS_ERROR_NOT_IMPLEMENTED;
 		}
 	}
 
@@ -31,7 +31,7 @@ int script_buffer_unload(void *handle)
 		unload = dlsym(RTLD_DEFAULT, "buffer_handler_unload");
 		if (!unload) {
 			ErrPrint("broken ABI: %s\n", dlerror());
-			return LB_STATUS_ERROR_NOT_IMPLEMENTED;
+			return DBOX_STATUS_ERROR_NOT_IMPLEMENTED;
 		}
 	}
 
@@ -46,7 +46,7 @@ int script_buffer_is_loaded(const void *handle)
 		is_loaded = dlsym(RTLD_DEFAULT, "buffer_handler_is_loaded");
 		if (!is_loaded) {
 			ErrPrint("broken ABI: %s\n", dlerror());
-			return LB_STATUS_ERROR_NOT_IMPLEMENTED;
+			return DBOX_STATUS_ERROR_NOT_IMPLEMENTED;
 		}
 	}
 
@@ -61,7 +61,7 @@ int script_buffer_resize(void *handle, int w, int h)
 		resize = dlsym(RTLD_DEFAULT, "buffer_handler_resize");
 		if (!resize) {
 			ErrPrint("broken ABI: %s\n", dlerror());
-			return LB_STATUS_ERROR_NOT_IMPLEMENTED;
+			return DBOX_STATUS_ERROR_NOT_IMPLEMENTED;
 		}
 	}
 
@@ -121,7 +121,7 @@ int script_buffer_pixmap(const void *handle)
 		buffer_pixmap = dlsym(RTLD_DEFAULT, "buffer_handler_pixmap");
 		if (!buffer_pixmap) {
 			ErrPrint("broken ABI: %s\n", dlerror());
-			return LB_STATUS_ERROR_NOT_IMPLEMENTED;
+			return DBOX_STATUS_ERROR_NOT_IMPLEMENTED;
 		}
 	}
 
@@ -151,7 +151,7 @@ int script_buffer_pixmap_release_buffer(void *canvas)
 		pixmap_release_buffer = dlsym(RTLD_DEFAULT, "buffer_handler_pixmap_release_buffer");
 		if (!pixmap_release_buffer) {
 			ErrPrint("broekn ABI: %s\n", dlerror());
-			return LB_STATUS_ERROR_NOT_IMPLEMENTED;
+			return DBOX_STATUS_ERROR_NOT_IMPLEMENTED;
 		}
 	}
 
@@ -181,7 +181,7 @@ int script_buffer_pixmap_unref(void *buffer_ptr)
 		pixmap_unref = dlsym(RTLD_DEFAULT, "buffer_handler_pixmap_unref");
 		if (!pixmap_unref) {
 			ErrPrint("broken ABI: %s\n", dlerror());
-			return LB_STATUS_ERROR_NOT_IMPLEMENTED;
+			return DBOX_STATUS_ERROR_NOT_IMPLEMENTED;
 		}
 	}
 
@@ -241,7 +241,7 @@ int script_buffer_get_size(void *handle, int *w, int *h)
 		get_size = dlsym(RTLD_DEFAULT, "buffer_handler_get_size");
 		if (!get_size) {
 			ErrPrint("broken ABI: %s\n", dlerror());
-			return LB_STATUS_ERROR_NOT_IMPLEMENTED;
+			return DBOX_STATUS_ERROR_NOT_IMPLEMENTED;
 		}
 	}
 
@@ -301,7 +301,7 @@ int script_buffer_raw_close(void *buffer)
 		raw_close = dlsym(RTLD_DEFAULT, "buffer_handler_raw_close");
 		if (!raw_close) {
 			ErrPrint("broken ABI: %s\n", dlerror());
-			return LB_STATUS_ERROR_NOT_IMPLEMENTED;
+			return DBOX_STATUS_ERROR_NOT_IMPLEMENTED;
 		}
 	}
 
@@ -331,7 +331,7 @@ int script_buffer_raw_size(void *buffer)
 		raw_size = dlsym(RTLD_DEFAULT, "buffer_handler_raw_size");
 		if (!raw_size) {
 			ErrPrint("broken ABI: %s\n", dlerror());
-			return LB_STATUS_ERROR_NOT_IMPLEMENTED;
+			return DBOX_STATUS_ERROR_NOT_IMPLEMENTED;
 		}
 	}
 
@@ -346,7 +346,7 @@ int script_buffer_lock(void *handle)
 		buffer_lock = dlsym(RTLD_DEFAULT, "buffer_handler_lock");
 		if (!buffer_lock) {
 			ErrPrint("broken ABI: %s\n", dlerror());
-			return LB_STATUS_ERROR_NOT_IMPLEMENTED;
+			return DBOX_STATUS_ERROR_NOT_IMPLEMENTED;
 		}
 	}
 
@@ -361,7 +361,7 @@ int script_buffer_unlock(void *handle)
 		buffer_unlock = dlsym(RTLD_DEFAULT, "buffer_handler_unlock");
 		if (!buffer_unlock) {
 			ErrPrint("broken ABI: %s\n", dlerror());
-			return LB_STATUS_ERROR_NOT_IMPLEMENTED;
+			return DBOX_STATUS_ERROR_NOT_IMPLEMENTED;
 		}
 	}
 
@@ -376,11 +376,56 @@ int script_buffer_signal_emit(void *buffer_handle, const char *part, const char 
 		signal_emit = dlsym(RTLD_DEFAULT, "script_signal_emit");
 		if (!signal_emit) {
 			ErrPrint("broken ABI: %s\n", dlerror());
-			return LB_STATUS_ERROR_NOT_IMPLEMENTED;
+			return DBOX_STATUS_ERROR_NOT_IMPLEMENTED;
 		}
 	}
 
 	return signal_emit(buffer_handle, part, signal, x, y, ex, ey);
+}
+
+int script_buffer_stride(void *handle)
+{
+	static int (*buffer_stride)(void *handle) = NULL;
+
+	if (!buffer_stride) {
+		buffer_stride = dlsym(RTLD_DEFAULT, "buffer_handler_stride");
+		if (!buffer_stride) {
+			ErrPrint("broken ABI: %s\n", dlerror());
+			return DBOX_STATUS_ERROR_NOT_IMPLEMENTED;
+		}
+	}
+
+	return buffer_stride(handle);
+}
+
+int script_buffer_auto_align(void)
+{
+	static int (*buffer_auto_align)(void) = NULL;
+
+	if (!buffer_auto_align) {
+		buffer_auto_align = dlsym(RTLD_DEFAULT, "buffer_handler_auto_align");
+		if (!buffer_auto_align) {
+			ErrPrint("borken ABI: %s\n", dlerror());
+			return DBOX_STATUS_ERROR_NOT_IMPLEMENTED;
+		}
+	}
+
+	return buffer_auto_align();
+}
+
+int script_buffer_pixels(void *handle)
+{
+	static int (*buffer_pixels)(void *handle) = NULL;
+
+	if (!buffer_pixels) {
+		buffer_pixels = dlsym(RTLD_DEFAULT, "buffer_handler_pixels");
+		if (!buffer_pixels) {
+			ErrPrint("broken ABI: %s\n", dlerror());
+			return DBOX_STATUS_ERROR_NOT_IMPLEMENTED;
+		}
+	}
+
+	return buffer_pixels(handle);
 }
 
 /* End of a file */

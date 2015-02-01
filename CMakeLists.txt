@@ -1,5 +1,5 @@
 CMAKE_MINIMUM_REQUIRED(VERSION 2.6)
-PROJECT(livebox-edje C)
+PROJECT(dynamicbox_edje C)
 
 INCLUDE(FindPkgConfig)
 pkg_check_modules(live_edje REQUIRED
@@ -10,7 +10,7 @@ pkg_check_modules(live_edje REQUIRED
 	eet
 	ecore
 	vconf
-	livebox-service
+	dynamicbox_service
 	elementary
 	capi-system-system-settings
 	efl-assist
@@ -31,14 +31,7 @@ ADD_DEFINITIONS("-DPACKAGE=\"${PROJECT_NAME}\"")
 ADD_DEFINITIONS("${EXTRA_CFLAGS} -g -Wall -Werror")
 ADD_DEFINITIONS("-DNDEBUG")
 ADD_DEFINITIONS("-D_USE_ECORE_TIME_GET")
-ADD_DEFINITIONS("-DLOG_TAG=\"LIVEBOX_EDJE\"")
-
-IF (MOBILE)
-	ADD_DEFINITIONS("-DMOBILE")
-ELSEIF (WEARABLE)
-	ADD_DEFINITIONS("-DWEARABLE")
-	ADD_DEFINITIONS("-DENABLE_ACCESSIBILITY")
-ENDIF (MOBILE)
+ADD_DEFINITIONS("-DLOG_TAG=\"DBOX_EDJE\"")
 
 ADD_LIBRARY(${PROJECT_NAME} SHARED
 	src/script_port.c

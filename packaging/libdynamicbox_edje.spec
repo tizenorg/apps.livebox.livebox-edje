@@ -1,8 +1,8 @@
-Name: liblivebox-edje
+Name: libdynamicbox_edje
 Summary: EDJE Script loader for the data provider master
-Version: 0.6.4
+Version: 1.0.0
 Release: 1
-Group: HomeTF/Livebox
+Group: HomeTF/DynamicBox
 License: Flora
 Source0: %{name}-%{version}.tar.gz
 Source1001: %{name}.manifest
@@ -15,13 +15,10 @@ BuildRequires: pkgconfig(eet)
 BuildRequires: pkgconfig(vconf)
 BuildRequires: pkgconfig(ecore)
 BuildRequires: pkgconfig(elementary)
-BuildRequires: pkgconfig(livebox-service)
+BuildRequires: pkgconfig(dynamicbox_service)
 BuildRequires: pkgconfig(capi-system-system-settings)
 BuildRequires: pkgconfig(efl-assist)
-
-%if "%{sec_product_feature_livebox}" == "0"
-ExclusiveArch:
-%endif
+BuildRequires: model-build-features
 
 %description
 Plugin for the data provider master to load the edje scripts
@@ -42,16 +39,7 @@ export CFLAGS="${CFLAGS} -DTIZEN_ENGINEER_MODE"
 export CXXFLAGS="${CXXFLAGS} -DTIZEN_ENGINEER_MODE"
 export FFLAGS="${FFLAGS} -DTIZEN_ENGINEER_MODE"
 %endif
-
-%if "%{_repository}" == "wearable"
-export WEARABLE=On
-export MOBILE=Off
-%elseif "%{_repository}" == "mobile"
-export WEARABLE=Off
-export MOBILE=On
-%endif
-
-%cmake . -DMOBILE=${MOBILE} -DWEARABLE=${WEARABLE}
+%cmake .
 make %{?jobs:-j%jobs}
 
 %install
@@ -61,7 +49,7 @@ mkdir -p %{buildroot}/%{_datarootdir}/license
 
 %post
 
-%files -n liblivebox-edje
+%files -n libdynamicbox_edje
 %manifest %{name}.manifest
 %defattr(-,root,root,-)
 /usr/share/data-provider-master/plugin-script/*.so*

@@ -22,7 +22,9 @@ extern void *script_buffer_pixmap_find(int pixmap);
 extern void *script_buffer_pixmap_buffer(void *handle);
 extern int script_buffer_lock(void *handle);
 extern int script_buffer_unlock(void *handle);
-
+extern int script_buffer_stride(void *handle);
+extern int script_buffer_auto_align(void);
+extern int script_buffer_pixels(void *handle);
 
 extern void *script_buffer_fb(void *handle);
 extern int script_buffer_get_size(void *handle, int *w, int *h);

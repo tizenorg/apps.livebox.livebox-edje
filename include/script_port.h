@@ -39,12 +39,12 @@ extern int script_load(void *handle, int (*render_pre)(void *buffer_handle, void
 extern int script_unload(void *handle);
 
 /*!
-	LB_ACCESS_HIGHLIGHT		0
-	LB_ACCESS_HIGHLIGHT_NEXT	1
-	LB_ACCESS_HIGHLIGHT_PREV	2
-	LB_ACCESS_ACTIVATE		3
-	LB_ACCESS_VALUE_CHANGE		4
-	LB_ACCESS_SCROLL		5
+	DBOX_ACCESS_HIGHLIGHT		0
+	DBOX_ACCESS_HIGHLIGHT_NEXT	1
+	DBOX_ACCESS_HIGHLIGHT_PREV	2
+	DBOX_ACCESS_ACTIVATE		3
+	DBOX_ACCESS_VALUE_CHANGE		4
+	DBOX_ACCESS_SCROLL		5
 */
 extern int script_feed_event(void *handle, int event_type, int x, int y, int down, unsigned int keycode, double timestamp);
 
